@@ -154,7 +154,7 @@ export class PCHAPApplication {
         const cutoffDate = new Date('2007-12-31');
         // Simple check: if birthdate is after cutoff, it's invalid
         if (birthDate > cutoffDate) {
-            alert('Applicants must be at least 18 years old (born in 2007 or earlier).');
+            // alert('Applicants must be at least 18 years old (born in 2007 or earlier).');
             input.value = '';
         }
     }
