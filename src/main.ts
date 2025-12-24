@@ -330,8 +330,8 @@ const routes: Record<string, () => string> = {
                 <div style="font-size: 1.2rem; color: var(--royal-blue); font-weight: 600;">Jesus Reigns Ministries, Inc.</div>
             </div>
             <div style="margin-bottom: 15px;">
-                <label style="font-size: 0.8rem; color: #666; text-transform: uppercase; font-weight: 700;">Account Number</label>
-                <div style="font-size: 1.5rem; color: var(--gold-dark); font-weight: 700; font-family: monospace;">00-5-02917-411-6</div>
+                <label style="font-size: 0.8rem; color: #666; text-transform: uppercase; font-weight: 700;">Savings Account Number</label>
+                <div style="font-size: 1.5rem; color: var(--royal-blue); font-weight: 700; font-family: monospace;">00-5-02917-411-6</div>
             </div>
             <div>
                 <label style="font-size: 0.8rem; color: #666; text-transform: uppercase; font-weight: 700;">Branch</label>
