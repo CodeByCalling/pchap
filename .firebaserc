@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "jrm-member-dng-portal"
+  },
+  "targets": {
+    "jrm-member-dng-portal": {
+      "hosting": {
+        "pchap": [
+          "jrm-pchap"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PCHAP - Pastor's Care Health Assistance Program</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- Application Flow Overlay -->
+    <div id="application-overlay" class="app-overlay">
+        <!-- Overlay Header -->
+        <header class="overlay-header">
+            <nav class="container">
+                <div class="logo">
+                    <span class="logo-main"><span class="text-gold">PCHAP</span> <span style="color: white;">DIGITAL</span></span>
+                </div>
+                <div class="overlay-nav-links">
+                    <button id="save-exit" class="btn btn-outline" style="border-color: var(--gold); color: var(--gold); padding: 8px 15px;">Save & Exit</button>
+                    <button id="close-app" class="btn btn-primary" style="padding: 8px 15px;">Return Home</button>
+                </div>
+                <button class="mobile-menu-btn"> <!-- Controlled by CSS and JS -->
+                    <span></span><span></span><span></span>
+                </button>
+            </nav>
+        </header>
+
+        <div class="app-container">
+            <div class="overlay-hero">
+                <h1>Membership <span class="text-gold">Application</span></h1>
+                <p>Please complete all steps to submit your official PCHAP enrollment.</p>
+                <div class="alert alert-info" style="margin-top: 15px; background: rgba(255, 255, 255, 0.1); padding: 10px; border-radius: 5px; font-size: 0.9rem;">
+                    <strong>Be ready with the following documents:</strong><br>
+                    • Valid ID (SSS, Passport, Driver's License)<br>
+                    • 2x2 Applicant Photo (White Background)<br>
+                    • PhilHealth ID or TIN Card<br>
+                    • Proof of Initial Contribution (500 PHP Receipt)
+                </div>
+            </div>
+            
+            <div class="stepper">
+                <div class="step active" data-step="1">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">Personal Info</div>
+                </div>
+                <div class="step" data-step="2">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">Health History</div>
+                </div>
+                <div class="step" data-step="3">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">Legal</div>
+                </div>
+                <div class="step" data-step="4">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">Upload</div>
+                </div>
+            </div>
+
+            <form id="membership-form">
+                <!-- Step 1: Appendix A -->
+                <div class="form-step active" id="step-1">
+                    <h2 class="form-title">Appendix A: Personal Information</h2>
+                    <div class="form-group-grid">
+                        <div class="form-group">
+                            <label for="surname">Surname</label>
+                            <input type="text" id="surname" name="surname" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="firstname">First Name</label>
+                            <input type="text" id="firstname" name="firstname" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="civilStatus">Civil Status</label>
+                            <select id="civilStatus" name="civilStatus" required>
+                                <option value="">Select...</option>
+                                <option value="single">Single</option>
+                                <option value="married">Married</option>
+                                <option value="separated">Separated</option>
+                                <option value="widowed">Widowed</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="birthday">Birthday</label>
+                            <input type="date" id="birthday" name="birthday" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="nationality">Nationality</label>
+                            <input type="text" id="nationality" name="nationality" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Home Mailing Address (Philippines)</label>
+                            <div class="address-grid">
+                                <input type="text" id="houseStreet" name="houseStreet" placeholder="House No. / Street / Village / Subdivision" required class="full-width">
+                                
+                                <div class="select-wrapper">
+                                    <select id="region" name="region" required>
+                                        <option value="">Select Region</option>
+                                    </select>
+                                </div>
+                                <div class="select-wrapper">
+                                    <select id="province" name="province" required disabled>
+                                        <option value="">Select Province</option>
+                                    </select>
+                                </div>
+                                <div class="select-wrapper">
+                                    <select id="city" name="city" required disabled>
+                                        <option value="">Select City / Municipality</option>
+                                    </select>
+                                </div>
+                                <div class="select-wrapper">
+                                    <select id="barangay" name="barangay" required disabled>
+                                        <option value="">Select Barangay</option>
+                                    </select>
+                                </div>
+                                
+                                <input type="text" id="zipCode" name="zipCode" placeholder="ZIP Code" pattern="\d{4}" maxlength="4">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group-grid">
+                        <div class="form-group">
+                            <label for="jobTitle">Job Title / Occupation</label>
+                            <input type="text" id="jobTitle" name="jobTitle">
+                        </div>
+                        <div class="form-group">
+                            <label for="sourceOfFunds">Source of Funds</label>
+                            <input type="text" id="sourceOfFunds" name="sourceOfFunds">
+                        </div>
+                        <div class="form-group">
+                            <label for="outreach">Church Outreach</label>
+                            <input type="text" id="outreach" name="outreach">
+                        </div>
+                        <div class="form-group">
+                            <label for="govId">SSS / Passport No.</label>
+                            <input type="text" id="govId" name="govId">
+                        </div>
+                        <div class="form-group">
+                            <label for="philhealth">PhilHealth / TIN</label>
+                            <input type="text" id="philhealth" name="philhealth">
+                        </div>
+                    </div>
+
+                    <div class="beneficiary-section">
+                        <h4>F. Immediate Family / Beneficiaries</h4>
+                        <p style="font-size: 0.8rem; color: #666; margin-bottom: 15px;">Children 18 years old and below may be listed.</p>
+                        <div class="table-container">
+                            <table id="beneficiary-table">
+                                <thead>
+                                    <tr>
+                                        <th>First Name</th>
+                                        <th>Last Name</th>
+                                        <th>Date of Birth</th>
+                                        <th>Relationship</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Dynamic Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="button" id="add-beneficiary" class="btn-add">+ Add Beneficiary</button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Health History -->
+                <div class="form-step" id="step-2">
+                    <h2 class="form-title">Appendix B: Health History</h2>
+                    
+                    <div class="form-group-grid" style="margin-bottom: 40px;">
+                        <div class="form-group">
+                            <label for="height">Height (cm)</label>
+                            <input type="number" id="height" name="height" placeholder="e.g. 170" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="weight">Weight (kg)</label>
+                            <input type="number" id="weight" name="weight" placeholder="e.g. 65" required>
+                        </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>Has there been a weight change of > 4kg in the last 12 months?</label>
+                            <div style="display: flex; gap: 20px; align-items: center; margin-top: 10px;">
+                                <label class="checkbox-item"><input type="radio" name="weightChange" value="yes"> Yes</label>
+                                <label class="checkbox-item"><input type="radio" name="weightChange" value="no"> No</label>
+                                <input type="text" name="weightChangeDetails" placeholder="If yes, provide details..." style="flex: 1;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="checklist-grid">
+                        <div class="checklist-group">
+                            <h4>A. Cardiovascular</h4>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="high-blood"> High blood pressure</label>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="chest-pain"> Chest pain</label>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="stroke"> Stroke</label>
+                        </div>
+                        <div class="checklist-group">
+                            <h4>B. Endocrine</h4>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="diabetes"> Diabetes</label>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="thyroid"> Thyroid disorder</label>
+                        </div>
+                        <div class="checklist-group">
+                            <h4>C. Urinary / Reproductive</h4>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="kidney"> Kidney disorder</label>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="bladder"> Bladder infection</label>
+                        </div>
+                        <div class="checklist-group">
+                            <h4>D. Cancer / Others</h4>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="cancer"> Cancer / Malignancy</label>
+                            <label class="checkbox-item"><input type="checkbox" name="health" value="arthritis"> Arthritis / Gout</label>
+                        </div>
+                    </div>
+
+                    <div class="women-only-trigger">
+                        <h4>For Women Only</h4>
+                        <div style="display: flex; gap: 30px; margin-top: 10px;">
+                            <div class="form-group">
+                                <label>Are you pregnant?</label>
+                                <div style="display: flex; gap: 15px;">
+                                    <label class="checkbox-item"><input type="radio" name="pregnant" value="yes"> Yes</label>
+                                    <label class="checkbox-item"><input type="radio" name="pregnant" value="no"> No</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>If yes, how many months?</label>
+                                <input type="number" name="pregnancyMonths" min="1" max="9">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Legal Disclosures -->
+                <div class="form-step" id="step-3">
+                    <h2 class="form-title">Appendix B: Member Acknowledgment</h2>
+                    <p style="margin-bottom: 25px;">Please certify each statement to proceed.</p>
+                    
+                    <div class="disclosure-list">
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="1" required>
+                                <span><strong>PCHAP is Not Insurance</strong>: I understand PCHAP is a mutual aid program, not a guaranteed insurance plan.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="2" required>
+                                <span><strong>Fund Availability</strong>: I acknowledge assistance is subject to fund availability and Board approval.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="3" required>
+                                <span><strong>Waiver of legal Claims</strong>: I agree not to file legal action if assistance is denied.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="4" required>
+                                <span><strong>Non-Refundable</strong>: All contributions are non-refundable and non-transferable.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="5" required>
+                                <span><strong>6-Month Rule</strong>: I must contribute for 6 months before being eligible for assistance.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="6" required>
+                                <span><strong>Suspension</strong>: I aware that 3 missed payments lead to suspension.</span>
+                            </label>
+                        </div>
+                        <div class="disclosure-item">
+                            <label>
+                                <input type="checkbox" name="disclosure" value="7" required>
+                                <span><strong>Accuracy</strong>: I certify that all documents and information provided are honest and accurate.</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Uploads -->
+                <div class="form-step" id="step-4">
+                    <h2 class="form-title">Final Step: Document Upload</h2>
+                    <p style="margin-bottom: 30px;">Please upload clear copies of the following documents.</p>
+                    
+                    <div class="info-card" style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid var(--royal-blue); margin-bottom: 25px;">
+                        <h4 style="margin: 0 0 10px 0; color: var(--royal-blue);">Payment Instruction</h4>
+                        <p style="font-size: 0.9rem; margin-bottom: 5px;">Please remit your initial contribution of <strong>500 PHP</strong> to:</p>
+                        <ul style="font-size: 0.9rem; list-style: none; padding: 0; margin: 0; line-height: 1.6;">
+                            <li><strong>Bank Name:</strong> Development Bank of the Philippines (DBP)</li>
+                            <li><strong>Account Name:</strong> Jesus Reigns Ministries, Inc.</li>
+                            <li><strong>Account Number:</strong> 00-5-02917-411-6</li>
+                            <li><strong>Branch:</strong> DBP Manila-Nakpil</li>
+                        </ul>
+                    </div>
+
+                    <p style="font-size: 0.85rem; color: #666; margin-bottom: 20px;">
+                        <strong>Note:</strong> Please take photos in a bright or clear environment to produce good results; otherwise, processing may be delayed.
+                    </p>
+                    
+                    <div class="upload-grid">
+                        <div class="upload-card">
+                            <label>
+                                <i>🪪</i>
+                                <p>Valid ID Card</p>
+                                <input type="file" name="idCard" accept="image/*,.pdf" required style="margin-top: 10px;">
+                            </label>
+                        </div>
+                        <div class="upload-card">
+                            <label>
+                                <i>👤</i>
+                                <p>2x2 Photo</p>
+                                <input type="file" name="photo" accept="image/*" required style="margin-top: 10px;">
+                            </label>
+                        </div>
+                        <div class="upload-card">
+                            <label>
+                                <i>🧾</i>
+                                <p>Initial Payment Receipt</p>
+                                <input type="file" name="receipt" accept="image/*,.pdf" required style="margin-top: 10px;">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="glass-card" style="margin-top: 40px; padding: 30px; background: rgba(0, 35, 102, 0.05); text-align: center;">
+                        <h4 style="color: var(--royal-blue);">Application Summary</h4>
+                        <p style="font-size: 0.9rem;">By clicking "Submit Application", you certify that all the above information is correct and you agree to the PCHAP terms.</p>
+                    </div>
+                </div>
+
+                <div class="step-nav">
+                    <button type="button" id="prev-btn" class="btn btn-outline" style="display: none;">Back</button>
+                    <button type="button" id="next-btn" class="btn btn-primary">Next Step</button>
+                    <button type="submit" id="submit-btn" class="btn btn-primary" style="display: none;">Submit Application</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
