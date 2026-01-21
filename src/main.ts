@@ -1,27 +1,22 @@
 import './style.css'
 import './application.css'
 import { PCHAPApplication } from './application'
+import { EndorsementSystem } from './endorsement'
+import { AdminDashboard } from './admin_dashboard'
+import { MemberDashboard } from './member_dashboard'
+import { auth, db } from './firebase_config'
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth'
+import { doc, getDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
-// --- Types & Dummy Data ---
-type UserRole = 'guest' | 'member' | 'admin';
-interface UserState {
-  isLoggedIn: boolean;
-  role: UserRole;
-  name: string;
-}
+// --- State ---
+let currentUser: User | null = null;
+let isAdmin = false; // We'll fetch this from a custom claim or Firestore
 
-let currentUser: UserState = {
-  isLoggedIn: false,
-  role: 'guest',
-  name: ''
-};
+// Local unsubscribe function to clean up listeners when navigating away
+let unsubscribeAdmin: (() => void) | null = null;
 
-const applications = [
-  { id: '101', name: 'John Doe', status: 'Pending', date: '2025-12-20' },
-  { id: '102', name: 'Jane Smith', status: 'Under Review', date: '2025-12-21' },
-];
 
 const faqs = [
   { q: "Is PCHAP an insurance product?", a: "No. PCHAP is not an insurance plan and is not regulated by the Insurance Commission of the Philippines. It is a faith-based, mutual aid program under J29 Corporation, designed to provide voluntary assistance based on fund availability." },
@@ -41,7 +36,7 @@ const faqs = [
 // --- Components ---
 
 const renderNavbar = (active: string) => {
-  const isAuth = currentUser.isLoggedIn;
+  const isAuth = !!currentUser;
   return `
   <header>
     <nav class="container">
@@ -101,7 +96,7 @@ const renderFooter = () => `
 
 // --- Routes ---
 
-const routes: Record<string, () => string> = {
+const routes: Record<string, () => string | Promise<string>> = {
   home: () => `
     <section id="hero">
       <div class="hero-content" style="text-align: center;">
@@ -349,82 +344,44 @@ const routes: Record<string, () => string> = {
     <section class="container" style="display: flex; justify-content: center; align-items: center; min-height: 60vh;">
       <div class="card" style="width: 100%; max-width: 400px; padding: 40px;">
         <h2 style="text-align: center; margin-bottom: 30px;">Member Sign In</h2>
+        
+        <div class="alert alert-info" style="margin-bottom: 25px; padding: 15px; background: #d1ecf1; border-left: 4px solid #0c5460; border-radius: 6px;">
+          <strong>Demo Accounts:</strong><br>
+          <small>
+            Admin: <code>admin@pchap.org</code><br>
+            Member: <code>member@pchap.org</code><br>
+            Password: <code>password123</code>
+          </small>
+        </div>
+        
         <div id="login-form">
           <div class="form-group" style="margin-bottom: 20px;">
-            <label>Username</label>
-            <input type="text" id="username" placeholder="Enter 'member' or 'admin'" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd;">
+            <label>Email Address</label>
+            <input type="email" id="username" placeholder="your.email@example.com" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd;">
           </div>
           <div class="form-group" style="margin-bottom: 30px;">
             <label>Password</label>
-            <input type="password" id="password" value="password" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd;">
+            <input type="password" id="password" placeholder="Enter your password" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd;">
           </div>
           <button id="do-login" class="btn btn-primary" style="width: 100%;">Sign In</button>
         </div>
       </div>
     </section>
   `,
-  dashboard: () => {
-    if (!currentUser.isLoggedIn) return routes.login();
+  dashboard: async () => {
+    if (!currentUser) return routes.login();
     
-    if (currentUser.role === 'admin') {
-      return `
-        <section class="container">
-          <h2 class="section-title">Backend Review Portal</h2>
-          <p style="margin-bottom: 30px;">Review and manage membership applications.</p>
-          <div class="table-container" style="background: white; border-radius: 15px; box-shadow: var(--soft-shadow);">
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead>
-                <tr style="background: var(--royal-blue); color: white;">
-                  <th style="padding: 15px;">App ID</th>
-                  <th style="padding: 15px;">Full Name</th>
-                  <th style="padding: 15px;">Submission Date</th>
-                  <th style="padding: 15px;">Status</th>
-                  <th style="padding: 15px;">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${applications.map(app => `
-                  <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 15px;">#${app.id}</td>
-                    <td style="padding: 15px;">${app.name}</td>
-                    <td style="padding: 15px;">${app.date}</td>
-                    <td style="padding: 15px;"><span style="color: orange; font-weight: 600;">${app.status}</span></td>
-                    <td style="padding: 15px;">
-                      <button class="btn btn-outline" style="padding: 5px 15px; font-size: 0.8rem;">Review Docs</button>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      `;
+    // Admin Dashboard
+    if (isAdmin) {
+      return AdminDashboard.renderDashboard();
     }
 
-    return `
-      <section class="container">
-        <div class="glass-card" style="background: var(--royal-blue); color: white; display: flex; align-items: center; gap: 2rem; padding: 40px;">
-          <div style="font-size: 3rem;">👋</div>
-          <div>
-            <h2>Welcome back, Pastor ${currentUser.name}!</h2>
-            <p>Your membership is active and your contributions are up to date.</p>
-          </div>
-        </div>
-        
-        <div class="cards-grid" style="margin-top: 40px;">
-          <div class="card">
-            <h3>My Application Status</h3>
-            <p style="font-size: 1.5rem; font-weight: 700; color: green; margin: 10px 0;">APPROVED</p>
-            <p style="font-size: 0.9rem;">Batch ID: PCHAP-2025-0042</p>
-          </div>
-          <div class="card">
-            <h3>Recent Contributions</h3>
-            <p>Dec 2025: <span style="font-weight: 600;">₱500 - Received</span></p>
-            <p>Nov 2025: <span style="font-weight: 600;">₱500 - Received</span></p>
-          </div>
-        </div>
-      </section>
-    `;
+    // Member Dashboard - fetch real data
+    return await MemberDashboard.renderDashboard(currentUser.uid);
+  },
+  endorse: () => {
+    // Handled specially in navigate function
+    return '';
   }
 }
 
@@ -452,18 +409,124 @@ const renderFAQ = (filter = "") => {
   `).join('')
 }
 
-const navigate = () => {
-  const hash = window.location.hash.slice(1) || 'home'
-  const route = routes[hash] || routes['home']
+const navigate = async () => {
+  const hash = window.location.hash.slice(1) || 'home';
+  const [routePath, queryString] = hash.split('?');
+  
+  // Special handling for endorsement page (no navbar/footer)
+  if (routePath === 'endorse') {
+    const params = new URLSearchParams(queryString);
+    const token = params.get('token');
+    
+    if (!token) {
+      app.innerHTML = EndorsementSystem.renderErrorPage('No endorsement token provided.');
+      return;
+    }
+
+    app.innerHTML = '<div style="text-align: center; padding: 50px;">Validating endorsement link...</div>';
+    
+    try {
+      const application = await EndorsementSystem.validateToken(token);
+      app.innerHTML = EndorsementSystem.renderEndorsementPage(application, token);
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      
+      // Attach event listeners for approve/reject
+      const approveBtn = document.getElementById('approve-btn') as HTMLButtonElement | null;
+      const rejectBtn = document.getElementById('reject-btn') as HTMLButtonElement | null;
+      const notesInput = document.getElementById('pastor-notes') as HTMLTextAreaElement;
+      const statusDiv = document.getElementById('endorsement-status')!;
+
+      approveBtn?.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to approve this application?')) return;
+        
+        approveBtn.disabled = true;
+        rejectBtn!.disabled = true;
+        approveBtn.innerText = 'Processing...';
+
+        try {
+          await EndorsementSystem.processEndorsement(
+            application.id,
+            'approve',
+            notesInput.value,
+            'Senior Pastor'
+          );
+          
+          statusDiv.className = 'status-message success show';
+          statusDiv.innerHTML = '✅ Application approved successfully! The applicant will be notified.';
+          approveBtn.style.display = 'none';
+          rejectBtn!.style.display = 'none';
+        } catch (error: any) {
+          statusDiv.className = 'status-message error show';
+          statusDiv.innerHTML = '❌ Error: ' + error.message;
+          approveBtn.disabled = false;
+          rejectBtn!.disabled = false;
+          approveBtn.innerText = '✓ Approve & Endorse';
+        }
+      });
+
+      rejectBtn?.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to reject this application?')) return;
+        
+        rejectBtn.disabled = true;
+        approveBtn!.disabled = true;
+        rejectBtn.innerText = 'Processing...';
+
+        try {
+          await EndorsementSystem.processEndorsement(
+            application.id,
+            'reject',
+            notesInput.value,
+            'Senior Pastor'
+          );
+          
+          statusDiv.className = 'status-message success show';
+          statusDiv.innerHTML = '✅ Application rejected. The applicant will be notified.';
+          approveBtn!.style.display = 'none';
+          rejectBtn.style.display = 'none';
+        } catch (error: any) {
+          statusDiv.className = 'status-message error show';
+          statusDiv.innerHTML = '❌ Error: ' + error.message;
+          rejectBtn.disabled = false;
+          approveBtn!.disabled = false;
+          rejectBtn.innerText = '✗ Reject Application';
+        }
+      });
+    } catch (error: any) {
+      app.innerHTML = EndorsementSystem.renderErrorPage(error.message);
+    }
+    
+    return;
+  }
+  
+  const route = routes[routePath] || routes['home'];
+  
+  // Await route if it's async
+  const content = await route();
   
   app.innerHTML = `
-    ${renderNavbar(hash)}
-    <main>${route()}</main>
+    ${renderNavbar(routePath)}
+    <main>${content}</main>
     ${renderFooter()}
   `
   
   // Reset scroll to top on every navigation
   window.scrollTo({ top: 0, behavior: 'instant' })
+
+  // Cleanup previous listeners
+  if (unsubscribeAdmin) {
+    unsubscribeAdmin();
+    unsubscribeAdmin = null;
+  }
+
+  // Admin Dashboard Logic
+  if (routePath === 'dashboard' && isAdmin) {
+      AdminDashboard.initializeDashboard();
+  }
+
+  // Member Dashboard Logic
+  if (routePath === 'dashboard' && !isAdmin) {
+      MemberDashboard.initializeContributionForm();
+  }
 
   if (hash === 'faq') {
     renderFAQ()
@@ -475,16 +538,22 @@ const navigate = () => {
 
   if (hash === 'login') {
     const loginBtn = document.getElementById('do-login')
-    loginBtn?.addEventListener('click', () => {
-      const user = (document.getElementById('username') as HTMLInputElement).value
-      if (user === 'admin') {
-        currentUser = { isLoggedIn: true, role: 'admin', name: 'Administrator' }
-        window.location.hash = 'dashboard'
-      } else if (user === 'member') {
-        currentUser = { isLoggedIn: true, role: 'member', name: 'John Doe' }
-        window.location.hash = 'dashboard'
-      } else {
-        alert('Please enter "member" or "admin"')
+    loginBtn?.addEventListener('click', async () => {
+      const email = (document.getElementById('username') as HTMLInputElement).value
+      const password = (document.getElementById('password') as HTMLInputElement).value
+      
+      const btn = loginBtn as HTMLButtonElement;
+      btn.disabled = true;
+      btn.innerText = "Signing in...";
+
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        // Navigate handled by onAuthStateChanged
+        window.location.hash = 'dashboard';
+      } catch (error: any) {
+        alert("Login Failed: " + error.message);
+        btn.disabled = false;
+        btn.innerText = "Sign In";
       }
     })
   }
@@ -492,8 +561,9 @@ const navigate = () => {
   // Logout listener
   document.getElementById('logout-btn')?.addEventListener('click', (e) => {
     e.preventDefault()
-    currentUser = { isLoggedIn: false, role: 'guest', name: '' }
-    window.location.hash = 'home'
+    signOut(auth).then(() => {
+        window.location.hash = 'home';
+    });
   })
 
   // Mobile menu logic
@@ -529,6 +599,18 @@ const navigate = () => {
 }
 
 window.addEventListener('hashchange', navigate)
-window.addEventListener('load', navigate)
 
-navigate()
+// Initialize Auth Listener
+onAuthStateChanged(auth, async (user) => {
+    currentUser = user;
+    if (user) {
+        // Check if admin (simple email check for now, later use Custom Claims)
+        // const adminDoc = await getDoc(doc(db, "admins", user.uid));
+        // isAdmin = adminDoc.exists(); 
+        // For prototype Phase 2: mock admin check based on email
+        isAdmin = user.email?.includes('admin') || false; 
+    } else {
+        isAdmin = false;
+    }
+    navigate();
+});

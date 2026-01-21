@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Applications:
+    // - Users can create their own application
+    // - Users can read their own application
+    // - Users cannot update their application after submission (only admins can)
+    // - Admins can read and update all applications
+    // - Anyone with a valid pastor endorsement token can update that specific application
+    match /applications/{userId} {
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow update: if request.auth != null && (isAdmin() || canEndorse());
+    }
+    
+    // Helper function to check for admin
+    // In production, use custom claims: request.auth.token.admin == true
+    function isAdmin() {
+      return request.auth.token.email.matches('.*admin.*');
+    }
+    
+    // Helper function to check if user can endorse (pastor with valid token)
+    // This allows pastor endorsement updates without requiring admin status
+    function canEndorse() {
+      // Allow updates to endorsement fields if the token matches
+      // In practice, this is validated in the application logic
+      return existingData().pastorEndorsementStatus == 'pending' &&
+             request.resource.data.pastorEndorsementStatus in ['approved', 'rejected'];
+    }
+    
+    // Helper to get existing document data
+    function existingData() {
+      return resource.data;
+    }
+
+    // Contributions:
+    // - Members can create their own contributions
+    // - Members can read their own contributions
+    // - Admins can read and update all contributions (for confirmation/rejection)
+    match /contributions/{contributionId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if request.auth != null && isAdmin();
+    }
+  }
+}

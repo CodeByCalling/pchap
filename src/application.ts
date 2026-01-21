@@ -1,4 +1,7 @@
 import { AddressService } from './philippine_address_data';
+import { auth, db, storage } from './firebase_config';
+import { doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export class PCHAPApplication {
     private currentStep: number = 1;
@@ -235,6 +238,16 @@ export class PCHAPApplication {
             if (!el.value || (el.type === 'checkbox' && !(el as HTMLInputElement).checked)) {
                 el.style.borderColor = '#ff4757';
                 isValid = false;
+            } else if (el.type === 'email' && el.value) {
+                // Email format validation
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(el.value)) {
+                    el.style.borderColor = '#ff4757';
+                    isValid = false;
+                    alert('Please enter a valid email address.');
+                } else {
+                    el.style.borderColor = '';
+                }
             } else {
                 el.style.borderColor = '';
             }
@@ -324,24 +337,143 @@ export class PCHAPApplication {
             return;
         }
 
+        const user = auth.currentUser;
+        if (!user) {
+            alert("You must be logged in to submit an application.");
+            return;
+        }
+
         // Show mock loading state
         const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
         const originalText = submitBtn.innerText;
         submitBtn.disabled = true;
-        submitBtn.innerText = 'Submitting...';
+        submitBtn.innerText = 'Uploading Documents...';
 
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        try {
+            // 1. Upload Files
+            const fileInputs = this.form?.querySelectorAll('input[type="file"]');
+            const fileUrls: Record<string, string> = {};
 
-        alert('Application Submitted Successfully! You will receive a confirmation email shortly.');
-        this.close();
-        
-        // Reset form
-        this.form?.reset();
-        // Remove previews
-        this.form?.querySelectorAll('.file-preview-img').forEach(img => img.remove());
-        if (this.beneficiaryTableBody) this.beneficiaryTableBody.innerHTML = '';
-        submitBtn.disabled = false;
-        submitBtn.innerText = originalText;
+            if (fileInputs) {
+                for (const input of Array.from(fileInputs) as HTMLInputElement[]) {
+                    const file = input.files?.[0];
+                    if (file) {
+                        const fileType = input.name; // idCard, photo, receipt
+                        const storageRef = ref(storage, `applicants/${user.uid}/${fileType}_${Date.now()}_${file.name}`);
+                        await uploadBytes(storageRef, file);
+                        const url = await getDownloadURL(storageRef);
+                        fileUrls[fileType] = url;
+                    }
+                }
+            }
+
+            submitBtn.innerText = 'Saving Application...';
+
+            // 2. Gather Form Data
+            const formData = new FormData(this.form!);
+            const data: any = {};
+            formData.forEach((value, key) => {
+                // Handle multiple values (beneficiaries)
+                if (key.endsWith('[]')) {
+                    const realKey = key.slice(0, -2);
+                    if (!data[realKey]) data[realKey] = [];
+                    data[realKey].push(value);
+                } else {
+                    data[key] = value;
+                }
+            });
+
+            // Structuring Beneficiaries
+            const beneficiaries = [];
+            if (data.b_f_name) {
+                for(let i=0; i<data.b_f_name.length; i++) {
+                    beneficiaries.push({
+                        firstName: data.b_f_name[i],
+                        lastName: data.b_l_name[i],
+                        dob: data.b_dob[i],
+                        relationship: data.b_rel[i]
+                    });
+                }
+            }
+
+            // Cleanup raw arrays
+            delete data.b_f_name; delete data.b_l_name; delete data.b_dob; delete data.b_rel;
+
+            // Generate secure pastor endorsement token
+            const endorsementToken = crypto.randomUUID();
+            const endorsementUrl = `${window.location.origin}${window.location.pathname}#endorse?token=${endorsementToken}`;
+
+            const finalDoc = {
+                userId: user.uid,
+                email: user.email,
+                personalInfo: {
+                    surname: data.surname,
+                    firstname: data.firstname,
+                    civilStatus: data.civilStatus,
+                    birthday: data.birthday,
+                    nationality: data.nationality,
+                    address: {
+                        houseStreet: data.houseStreet,
+                        region: data.region,
+                        province: data.province,
+                        city: data.city,
+                        barangay: data.barangay,
+                        zipCode: data.zipCode
+                    },
+                    jobTitle: data.jobTitle,
+                    sourceOfFunds: data.sourceOfFunds,
+                    outreach: data.outreach,
+                    govIdNo: data.govId,
+                    philhealthNo: data.philhealth
+                },
+                healthHistory: {
+                    height: data.height,
+                    weight: data.weight,
+                    weightChange: data.weightChange,
+                    weightChangeDetails: data.weightChangeDetails,
+                    conditions: formData.getAll('health'),
+                    pregnant: data.pregnant,
+                    pregnancyMonths: data.pregnancyMonths
+                },
+                beneficiaries: beneficiaries,
+                documents: fileUrls,
+                // Workflow Status Fields
+                status: 'Pending Pastor Endorsement',
+                pastorEndorsementToken: endorsementToken,
+                pastorEndorsementStatus: 'pending',
+                pastorEndorsementBy: null,
+                pastorEndorsementAt: null,
+                pastorEndorsementNotes: '',
+                adminReviewStatus: 'pending',
+                adminReviewBy: null,
+                adminReviewAt: null,
+                finalApprovalStatus: 'pending',
+                finalApprovalBy: null,
+                finalApprovalAt: null,
+                adminNotes: [],
+                submittedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            // 3. Save to Firestore
+            await setDoc(doc(db, "applications", user.uid), finalDoc);
+
+            // Show success with pastor endorsement instructions
+            alert(`✅ Application Submitted Successfully!\n\n📧 IMPORTANT: Please send the following endorsement link to your Senior Pastor:\n\n${endorsementUrl}\n\nYour application will be reviewed after pastor endorsement.`);
+            this.close();
+            
+            // Reset form
+            this.form?.reset();
+            // Remove previews
+            this.form?.querySelectorAll('.file-preview-img').forEach(img => img.remove());
+            if (this.beneficiaryTableBody) this.beneficiaryTableBody.innerHTML = '';
+
+        } catch (error: any) {
+            console.error("Submission Error", error);
+            alert("Error submitting application: " + error.message);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerText = originalText;
+        }
     }
 }
