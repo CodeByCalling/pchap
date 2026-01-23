@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/jpeg" href="/favicon.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PCHAP - Pastor's Care Health Assistance Program</title>
     <!-- Google Fonts -->
@@ -90,10 +90,7 @@
                             <label for="birthday">Birthday</label>
                             <input type="date" id="birthday" name="birthday" required>
                         </div>
-                        <div class="form-group">
-                            <label for="nationality">Nationality</label>
-                            <input type="text" id="nationality" name="nationality" required>
-                        </div>
+
                         <div class="form-group">
                             <label for="email">Email Address</label>
                             <input type="email" id="email" name="email" placeholder="example@email.com" required>
@@ -138,6 +135,30 @@
                             <label for="sourceOfFunds">Source of Funds</label>
                             <input type="text" id="sourceOfFunds" name="sourceOfFunds">
                         </div>
+                        
+                        <!-- Supervisor Information -->
+                        <div class="form-group" style="grid-column: span 2; margin-top: 15px; background: #f8f9fa; padding: 15px; border-radius: 6px;">
+                            <h4 style="margin: 0 0 10px 0; color: var(--royal-blue); font-size: 0.95rem;">Supervisor Information</h4>
+                            <div class="form-group-grid">
+                                <div class="form-group">
+                                    <label for="supervisorName">Supervisor Name</label>
+                                    <input type="text" id="supervisorName" name="supervisorName" required placeholder="Full Name">
+                                </div>
+                                <div class="form-group">
+                                    <label for="supervisorRole">Role / Position</label>
+                                    <input type="text" id="supervisorRole" name="supervisorRole" required placeholder="e.g. Head Pastor">
+                                </div>
+                                <div class="form-group">
+                                    <label for="supervisorPhone">Phone Number</label>
+                                    <input type="tel" id="supervisorPhone" name="supervisorPhone" required placeholder="09xxxxxxxxx">
+                                </div>
+                                <div class="form-group">
+                                    <label for="supervisorEmail">Email Address</label>
+                                    <input type="email" id="supervisorEmail" name="supervisorEmail" required placeholder="email@example.com">
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label for="outreach">Church Outreach</label>
                             <input type="text" id="outreach" name="outreach">

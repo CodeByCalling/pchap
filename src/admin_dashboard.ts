@@ -1,8 +1,95 @@
 import { db } from './firebase_config';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, addDoc, Timestamp, getDocs, getDoc, sum, where } from 'firebase/firestore';
+import { MemberDashboard } from './member_dashboard';
+import { generateCSV, downloadCSV } from './csv_utils';
 
 export class AdminDashboard {
-    private unsubscribe: (() => void) | null = null;
+    private static unsubscribeContributions: (() => void) | null = null;
+    private static unsubscribeApplications: (() => void) | null = null;
+
+
+    /**
+     * Action: Export Approved Members
+     */
+    static async exportMembers(): Promise<void> {
+        try {
+            const q = query(collection(db, 'applications'), where('finalApprovalStatus', '==', 'approved'));
+            const snapshot = await getDocs(q);
+            
+            if (snapshot.empty) {
+                alert('No approved members found to export.');
+                return;
+            }
+
+            const exportData = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    'Name': `${data.personalInfo?.firstname || ''} ${data.personalInfo?.surname || ''}`.trim(),
+                    'Email': data.email || '',
+                    'Phone': data.personalInfo?.mobileNumber || '',
+                    'Start Date': data.approvedAt ? new Date(data.approvedAt).toLocaleDateString() : (data.submittedAt ? new Date(data.submittedAt).toLocaleDateString() : '')
+                };
+            });
+
+            const csv = generateCSV(exportData, ['Name', 'Email', 'Phone', 'Start Date']);
+            downloadCSV(csv, `PCHAP_Members_${new Date().toISOString().split('T')[0]}.csv`);
+
+        } catch (error) {
+            console.error('Export failed:', error);
+            alert('Failed to export members. Check console for details.');
+        }
+    }
+
+    /**
+     * Action: Export Contributions
+     */
+    static async exportContributions(): Promise<void> {
+        try {
+            // Fetch ALL confirmed contributions for official records
+            const q = query(collection(db, 'contributions'), orderBy('month', 'desc'));
+            const snapshot = await getDocs(q);
+
+            if (snapshot.empty) {
+                alert('No contributions found to export.');
+                return;
+            }
+
+            // Need to map userIds to names efficiently
+            const userIds = new Set(snapshot.docs.map(d => d.data().userId).filter(id => !!id));
+            const userMap = new Map<string, string>();
+
+            // Fetch users in batches is better, but for simplicity/robustness here we'll do individual fetches if not cached,
+            // OR simpler: just fetch all approved applications again or rely on what we can. 
+            // Better: Fetch all needed users in one go? No, Firestore "IN" limit is 10.
+            // Client-side join approach:
+            // Since we likely have < 1000 members, fetching all applications for the map is actually cheaper/easier than many lookups.
+            const usersSnap = await getDocs(collection(db, 'applications'));
+            usersSnap.forEach(d => {
+                const ud = d.data();
+                userMap.set(d.id, `${ud.personalInfo?.firstname || ''} ${ud.personalInfo?.surname || ''}`.trim());
+            });
+
+            const exportData = snapshot.docs.map(doc => {
+                const data = doc.data();
+                const memberName = data.userName || userMap.get(data.userId) || data.userEmail || 'Unknown';
+                return {
+                    'Month': data.month || '',
+                    'Member Name': memberName,
+                    'Amount': data.amount || 0,
+                    'Ref Number': data.referenceNumber || '', // Assuming this field exists or we leave it blank
+                    'Status': data.status,
+                    'Date Submitted': data.submittedAt ? new Date(data.submittedAt).toLocaleDateString() : ''
+                };
+            });
+
+            const csv = generateCSV(exportData, ['Month', 'Member Name', 'Amount', 'Ref Number', 'Status', 'Date Submitted']);
+            downloadCSV(csv, `PCHAP_Financials_${new Date().toISOString().split('T')[0]}.csv`);
+
+        } catch (error) {
+            console.error('Export failed:', error);
+            alert('Failed to export contributions. Check console for details.');
+        }
+    }
 
     /**
      * Render the admin dashboard with application queue
@@ -13,6 +100,9 @@ export class AdminDashboard {
                 <h2 class="section-title">Admin Review Portal</h2>
                 <p style="margin-bottom: 30px;">Review and manage membership applications and monthly contributions.</p>
                 
+                <!-- Analytics Overview -->
+                <div id="analytics-overview" style="margin-bottom: 40px;"></div>
+
                 <!-- Tab Navigation -->
                 <div class="tab-navigation" style="margin-bottom: 30px;">
                     <button class="tab-btn active" data-tab="applications">Applications</button>
@@ -28,6 +118,13 @@ export class AdminDashboard {
                         <button class="filter-btn" data-filter="endorsed">Endorsed</button>
                         <button class="filter-btn" data-filter="approved">Approved</button>
                         <button class="filter-btn" data-filter="rejected">Rejected</button>
+                    </div>
+
+                    <!-- Export Button added here -->
+                    <div style="margin-bottom: 20px;">
+                        <button id="export-members-btn" class="btn btn-outline" style="font-size: 0.9rem;">
+                            ⬇ Export Approved Members CSV
+                        </button>
                     </div>
 
                     <div class="table-container" style="background: white; border-radius: 15px; box-shadow: var(--soft-shadow);">
@@ -52,10 +149,17 @@ export class AdminDashboard {
                 <!-- Contributions Tab -->
                 <div id="contributions-tab" class="tab-content">
                     <div class="filter-tabs" style="margin-bottom: 30px;">
-                        <button class="contrib-filter-btn active" data-filter="all">All Contributions</button>
-                        <button class="contrib-filter-btn" data-filter="pending">Pending</button>
-                        <button class="contrib-filter-btn" data-filter="confirmed">Confirmed</button>
-                        <button class="contrib-filter-btn" data-filter="rejected">Rejected</button>
+                        <button class="filter-btn active" data-filter="all">All Contributions</button>
+                        <button class="filter-btn" data-filter="pending">Pending</button>
+                        <button class="filter-btn" data-filter="confirmed">Confirmed</button>
+                        <button class="filter-btn" data-filter="rejected">Rejected</button>
+                    </div>
+
+                    <!-- Export Button added here -->
+                    <div style="margin-bottom: 20px;">
+                        <button id="export-contributions-btn" class="btn btn-outline" style="font-size: 0.9rem;">
+                            ⬇ Export Financial CSV
+                        </button>
                     </div>
 
                     <div class="table-container" style="background: white; border-radius: 15px; box-shadow: var(--soft-shadow);">
@@ -191,6 +295,12 @@ export class AdminDashboard {
                     color: #721c24;
                 }
 
+                .status-returned {
+                    background: #ffdfba;
+                    color: #d35400;
+                    border: 1px solid #ffb3b3;
+                }
+
                 .modal-overlay {
                     display: none;
                     position: fixed;
@@ -231,6 +341,92 @@ export class AdminDashboard {
                     color: #666;
                 }
 
+                .analytics-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .stat-card {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    box-shadow: var(--soft-shadow);
+                    display: flex;
+                    flex-direction: column;
+                }
+                
+                .stat-title {
+                    color: #666;
+                    font-size: 0.9rem;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    margin-bottom: 10px;
+                    font-weight: 600;
+                }
+                
+                .stat-value {
+                    font-size: 2.5rem;
+                    font-weight: 700;
+                    color: var(--royal-blue);
+                }
+                
+                .stat-subtitle {
+                    color: #888;
+                    font-size: 0.9rem;
+                    margin-top: 5px;
+                }
+
+                .chart-container {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    box-shadow: var(--soft-shadow);
+                }
+                
+                .bar-chart {
+                    display: flex;
+                    align-items: flex-end;
+                    justify-content: space-between;
+                    height: 200px;
+                    padding-top: 20px;
+                    gap: 10px;
+                }
+                
+                .bar-group {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .bar {
+                    width: 100%;
+                    background: var(--royal-blue);
+                    border-radius: 6px 6px 0 0;
+                    transition: height 1s ease-out;
+                    min-height: 4px;
+                    opacity: 0.8;
+                }
+                
+                .bar:hover {
+                    opacity: 1;
+                }
+                
+                .bar-label {
+                    font-size: 0.8rem;
+                    color: #666;
+                    font-weight: 600;
+                }
+                
+                .bar-value {
+                    font-size: 0.8rem;
+                    font-weight: 700;
+                    color: #333;
+                }
+
                 .modal-close:hover {
                     color: #000;
                 }
@@ -242,45 +438,220 @@ export class AdminDashboard {
      * Initialize admin dashboard with real-time listeners
      */
    static initializeDashboard(): void {
-        const tbody = document.getElementById('admin-applications-table');
-        if (!tbody) return;
-
-        let currentFilter = 'all';
-
-        // Filter button listeners
-        document.querySelectorAll('.filter-btn').forEach(btn => {
+        // Setup tab navigation
+        document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                // Switch active button
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                currentFilter = btn.getAttribute('data-filter') || 'all';
-                // Re-render with filter (handled by onSnapshot)
+                // Show corresponding tab content
+                const tab = btn.getAttribute('data-tab');
+                document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+                const target = document.getElementById(`${tab}-tab`);
+                if (target) target.classList.add('active');
+                // Initialize listeners for the selected tab
+                if (tab === 'applications') {
+                    AdminDashboard.initApplications();
+                } else if (tab === 'contributions') {
+                    AdminDashboard.initContributions();
+                }
             });
         });
 
-        // Real-time listener for applications
-        const q = query(collection(db, 'applications'), orderBy('submittedAt', 'desc'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            tbody.innerHTML = '';
-            if (snapshot.empty) {
+        // Initialize Applications tab by default
+        AdminDashboard.initApplications();
+        
+        // Initialize Analytics
+        AdminDashboard.renderAnalytics();
+
+        // Export Buttons
+        const exportMembersBtn = document.getElementById('export-members-btn');
+        if (exportMembersBtn) {
+            exportMembersBtn.addEventListener('click', () => {
+                const originalText = exportMembersBtn.innerText;
+                exportMembersBtn.innerText = 'Generating...';
+                AdminDashboard.exportMembers().finally(() => {
+                    exportMembersBtn.innerText = originalText;
+                });
+            });
+        }
+
+        const exportContribBtn = document.getElementById('export-contributions-btn');
+        if (exportContribBtn) {
+            exportContribBtn.addEventListener('click', () => {
+                const originalText = exportContribBtn.innerText;
+                exportContribBtn.innerText = 'Generating...';
+                AdminDashboard.exportContributions().finally(() => {
+                    exportContribBtn.innerText = originalText;
+                });
+            });
+        }
+    }
+
+    /**
+     * Render Analytics with Real-Time Stats
+     */
+    static async renderAnalytics(): Promise<void> {
+        const container = document.getElementById('analytics-overview');
+        if (!container) return;
+
+        // Skeleton Loading State
+        container.innerHTML = `
+            <div class="analytics-grid">
+                <div class="stat-card">
+                    <div class="stat-title">Total Funds Raised</div>
+                    <div class="skeleton" style="height: 40px; width: 150px; background: #f0f0f0; border-radius: 8px;">Loading...</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-title">Approval Rate</div>
+                    <div class="skeleton" style="height: 40px; width: 100px; background: #f0f0f0; border-radius: 8px;">Loading...</div>
+                </div>
+            </div>
+            <div class="chart-container">
+                <div class="stat-title">Contributions (Last 6 Months)</div>
+                <div class="skeleton" style="height: 200px; width: 100%; background: #f0f0f0; border-radius: 8px;">Loading...</div>
+            </div>
+        `;
+
+        try {
+            // ROBUST (Client-Side) Calculation Strategy
+            // Since dataset is small (<10k), we can fetch all relevant docs once to ensure stability.
+            
+            // 1. Applications Stats
+            const appsSnap = await getDocs(collection(db, 'applications'));
+            const totalApps = appsSnap.size;
+            const approvedApps = appsSnap.docs.filter(d => d.data().finalApprovalStatus === 'approved').length;
+            const conversionRate = totalApps > 0 ? ((approvedApps / totalApps) * 100).toFixed(1) : '0.0';
+
+            // 2. Contributions Stats (Funds & Chart)
+            const contribSnap = await getDocs(query(collection(db, 'contributions'), orderBy('month', 'asc'))); // Order by month for chart
+            let totalFunds = 0;
+            const chartMap = new Map<string, number>();
+            
+            // Initialize last 6 months in map
+            const last6Months = [];
+            const today = new Date();
+            for (let i = 5; i >= 0; i--) {
+                const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const label = d.toLocaleString('default', { month: 'short' });
+                last6Months.push({ key, label });
+                chartMap.set(key, 0);
+            }
+
+            contribSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.status === 'confirmed') {
+                    totalFunds += (Number(data.amount) || 0);
+                    
+                    // Add to chart if within range
+                    if (chartMap.has(data.month)) {
+                        chartMap.set(data.month, chartMap.get(data.month)! + (Number(data.amount) || 0));
+                    }
+                }
+            });
+
+            const chartData = last6Months.map(m => ({
+                label: m.label,
+                value: chartMap.get(m.key) || 0
+            }));
+
+            const maxValue = Math.max(...chartData.map(d => d.value), 1);
+
+            // Render Final HTML
+            container.innerHTML = `
+                <div class="analytics-grid">
+                    <div class="stat-card">
+                        <div class="stat-title">Total Funds Raised</div>
+                        <div class="stat-value">₱${totalFunds.toLocaleString()}</div>
+                        <div class="stat-subtitle">Confirmed Contributions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">Approval Rate</div>
+                        <div class="stat-value">${conversionRate}%</div>
+                        <div class="stat-subtitle">${approvedApps} of ${totalApps} Applications</div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="stat-title">Contributions Overview</div>
+                    <div class="bar-chart">
+                        ${chartData.map(data => `
+                            <div class="bar-group">
+                                <span class="bar-value">₱${data.value > 0 ? (data.value / 1000).toFixed(1) + 'k' : '0'}</span>
+                                <div class="bar" style="height: ${(data.value / maxValue) * 100}%;"></div>
+                                <span class="bar-label">${data.label}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+        } catch (error: any) {
+            console.error('Error loading analytics:', error);
+            container.innerHTML = `
+                <div style="background: #fff3cd; color: #856404; padding: 20px; border-radius: 8px;">
+                    <strong>Failed to load analytics:</strong> ${error.message}. <br><small>Please check rights/console.</small>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Initialize Applications listener
+     */
+    static initApplications(): void {
+        // Unsubscribe from previous listener if it exists
+        if (AdminDashboard.unsubscribeApplications) {
+            AdminDashboard.unsubscribeApplications();
+            AdminDashboard.unsubscribeApplications = null;
+        }
+
+        const tbody = document.getElementById('admin-applications-table');
+        if (!tbody) return;
+        let currentFilter = 'all';
+        // Filter button listeners (reuse existing logic)
+        // Filter button listeners (Applications)
+        const tabContainer = document.getElementById('applications-tab');
+        if (tabContainer) {
+            tabContainer.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    tabContainer.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.getAttribute('data-filter') || 'all';
+                    // Re-render will happen in onSnapshot callback using currentFilter variable
+                    // We need to manually trigger a refresh or just let the next snapshot update it.
+                    // However, since onSnapshot is already running, we can just let it be if we store currentFilter in a scope accessible to the callback
+                    // BUT: The callback captures the variable 'currentFilter' from the outer scope of initApplications.
+                    // So changing it here works! But we need to re-run the render logic.
+                    // Since snapshot listener is active, we can't easily force it to re-run without a new snapshot.
+                    // Hack: We will just call the render function if we extract it, OR simpler:
+                    // We just re-issue the query or rely on the fact that we might need to store the snapshot to re-render.
+                    // Let's refactor slightly to store snapshot
+                });
+            });
+        }
+        
+        let lastSnapshot: any = null;
+
+        const renderTable = () => {
+             if (!lastSnapshot) return;
+             tbody.innerHTML = '';
+             if (lastSnapshot.empty) {
                 tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center;">No applications found.</td></tr>';
                 return;
             }
-
             let filteredCount = 0;
-            snapshot.forEach((docSnap) => {
+            lastSnapshot.forEach((docSnap: any) => {
                 const data = docSnap.data();
                 const appId = docSnap.id;
-
-                // Apply filter
                 if (currentFilter !== 'all') {
                     if (currentFilter === 'pending' && data.pastorEndorsementStatus !== 'pending') return;
                     if (currentFilter === 'endorsed' && data.pastorEndorsementStatus !== 'approved') return;
                     if (currentFilter === 'approved' && data.finalApprovalStatus !== 'approved') return;
                     if (currentFilter === 'rejected' && (!data.status.toLowerCase().includes('reject'))) return;
                 }
-
                 filteredCount++;
-
                 const row = `
                     <tr style="border-bottom: 1px solid #eee;">
                         <td style="padding: 15px; font-family: monospace;">#${appId.slice(0, 8)}</td>
@@ -299,29 +670,189 @@ export class AdminDashboard {
                 `;
                 tbody.innerHTML += row;
             });
-
             if (filteredCount === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center;">No applications match this filter.</td></tr>';
             }
-
-            // Attach view detail listeners
             document.querySelectorAll('.view-app-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const appId = btn.getAttribute('data-app-id');
                     if (appId) {
-                        const appDoc = snapshot.docs.find(d => d.id === appId);
+                        const appDoc = lastSnapshot.docs.find((d: any) => d.id === appId);
                         if (appDoc) {
                             AdminDashboard.showApplicationDetail(appDoc.id, appDoc.data());
                         }
                     }
                 });
             });
+        };
+
+        // Update listener to call renderTable
+        if(tabContainer) {
+             tabContainer.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // Update active class
+                    tabContainer.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.getAttribute('data-filter') || 'all';
+                    renderTable();
+                });
+            });
+        }
+        
+        const q = query(collection(db, 'applications'), orderBy('submittedAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            lastSnapshot = snapshot;
+            renderTable();
         }, (error) => {
             console.error('Error fetching applications:', error);
             tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: red;">Error loading data. Check console.</td></tr>';
         });
+        AdminDashboard.unsubscribeApplications = unsubscribe;
     }
 
+    /**
+     * Initialize Contributions listener
+     */
+    /**
+     * Initialize Contributions listener
+     */
+    static initContributions(): void {
+        const tbody = document.getElementById('admin-contributions-table');
+        if (!tbody) return;
+        let currentFilter = 'all';
+        let lastSnapshot: any = null;
+        
+        // Cache for member names: userId -> "Firstname Surname"
+        const nameCache = new Map<string, string>();
+
+        const renderTable = async () => {
+            if (!lastSnapshot) return;
+            tbody.innerHTML = '';
+            
+            if (lastSnapshot.empty) {
+                tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center;">No contributions found.</td></tr>';
+                return;
+            }
+
+            // Identify users who need name resolution (missing userName in contribution AND not in cache)
+            const userIdsToFetch = new Set<string>();
+            lastSnapshot.docs.forEach((d: any) => {
+                const data = d.data();
+                if (!data.userName && data.userId && !nameCache.has(data.userId)) {
+                    userIdsToFetch.add(data.userId);
+                }
+            });
+
+            // Batch fetch missing names (concurrently)
+            if (userIdsToFetch.size > 0) {
+                 tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center;">Loading member details...</td></tr>';
+                 await Promise.all(Array.from(userIdsToFetch).map(async (uid) => {
+                     try {
+                         const userDoc = await getDoc(doc(db, 'applications', uid));
+                         if (userDoc.exists()) {
+                             const uData = userDoc.data();
+                             if (uData.personalInfo?.firstname) {
+                                 nameCache.set(uid, `${uData.personalInfo.firstname} ${uData.personalInfo.surname}`);
+                             } else {
+                                 nameCache.set(uid, uData.email || 'Unknown');
+                             }
+                         }
+                     } catch (e) {
+                         console.error("Failed to fetch user name for", uid, e);
+                     }
+                 }));
+                 // clear loading message
+                 tbody.innerHTML = '';
+            }
+
+            let filteredCount = 0;
+            // Filter logic
+            lastSnapshot.forEach((docSnap: any) => {
+                const data = docSnap.data();
+                const contribId = docSnap.id;
+
+                if (currentFilter !== 'all') {
+                    if (currentFilter === 'pending' && data.status !== 'pending') return;
+                    if (currentFilter === 'confirmed' && data.status !== 'confirmed') return;
+                    if (currentFilter === 'rejected' && data.status !== 'rejected') return;
+                }
+                filteredCount++;
+                
+                const isPending = data.status === 'pending';
+                // RESOLVE NAME: stored userName > cached name > userEmail
+                const displayName = data.userName || nameCache.get(data.userId) || data.userEmail || 'Unknown';
+
+                const row = `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 15px;">
+                            <strong>${displayName}</strong><br>
+                            <span style="font-size: 0.8em; color: #888;">${data.userEmail || ''}</span>
+                        </td>
+                        <td style="padding: 15px;">${MemberDashboard.formatMonth(data.month)}</td>
+                        <td style="padding: 15px; font-weight: 600;">₱${data.amount}</td>
+                        <td style="padding: 15px;">
+                            <small>${new Date(data.submittedAt).toLocaleDateString()}</small>
+                        </td>
+                        <td style="padding: 15px;">
+                            <span class="status-badge status-${data.status}">${data.status.toUpperCase()}</span>
+                        </td>
+                        <td style="padding: 15px;">
+                            <div style="display: flex; gap: 5px;">
+                                ${data.receiptUrl ? `<a href="${data.receiptUrl}" target="_blank" class="btn btn-outline" style="padding: 5px 10px; font-size: 0.8rem;">View</a>` : ''}
+                                ${isPending ? `
+                                    <button class="btn btn-primary confirm-contrib-btn" data-id="${contribId}" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745; border-color: #28a745;">✓</button>
+                                    <button class="btn btn-outline reject-contrib-btn" data-id="${contribId}" style="padding: 5px 10px; font-size: 0.8rem; color: #dc3545; border-color: #dc3545;">✗</button>
+                                ` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+             if (filteredCount === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center;">No contributions match this filter.</td></tr>';
+            }
+
+            // Attach listeners
+             document.querySelectorAll('.confirm-contrib-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const id = (e.currentTarget as HTMLElement).getAttribute('data-id');
+                    if (id) await AdminDashboard.updateContributionStatus(id, 'confirmed');
+                });
+            });
+
+            document.querySelectorAll('.reject-contrib-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const id = (e.currentTarget as HTMLElement).getAttribute('data-id');
+                    if (id && confirm('Reject this contribution?')) {
+                        await AdminDashboard.updateContributionStatus(id, 'rejected');
+                    }
+                });
+            });
+        };
+
+        const tabContainer = document.getElementById('contributions-tab');
+        if (tabContainer) {
+            tabContainer.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    tabContainer.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = btn.getAttribute('data-filter') || 'all';
+                    renderTable();
+                });
+            });
+        }
+
+        const q = query(collection(db, 'contributions'), orderBy('submittedAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            lastSnapshot = snapshot;
+            renderTable();
+        }, (error) => {
+            console.error('Error fetching contributions:', error);
+            tbody.innerHTML = '<tr><td colspan="6" style="padding: 20px; text-align: center; color: red;">Error loading contributions.</td></tr>';
+        });
+        AdminDashboard.unsubscribeContributions = unsubscribe;
+    }
     /**
      * Show application detail modal
      */
@@ -360,10 +891,31 @@ export class AdminDashboard {
 
                 <div class="info-section">
                     <h3>Documents</h3>
-                    <div style="display: grid; gap: 1rem;">
-                        ${data.documents?.idCard ? `<a href="${data.documents.idCard}" target="_blank" class="btn btn-outline">View ID Card</a>` : ''}
-                        ${data.documents?.photo ? `<a href="${data.documents.photo}" target="_blank" class="btn btn-outline">View Photo</a>` : ''}
-                        ${data.documents?.receipt ? `<a href="${data.documents.receipt}" target="_blank" class="btn btn-outline">View Receipt</a>` : ''}
+                    <div class="docs-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+                        ${data.documents?.idCard ? `
+                            <div class="doc-card">
+                                <p style="font-weight:600; font-size: 0.9em; margin-bottom: 5px;">ID Card</p>
+                                <img src="${data.documents.idCard}" class="doc-preview" onclick="window.open('${data.documents.idCard}', '_blank')" style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid #ddd; transition: transform 0.2s;">
+                            </div>
+                        ` : ''}
+                        ${data.documents?.photo ? `
+                            <div class="doc-card">
+                                <p style="font-weight:600; font-size: 0.9em; margin-bottom: 5px;">Photo</p>
+                                <img src="${data.documents.photo}" class="doc-preview" onclick="window.open('${data.documents.photo}', '_blank')" style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid #ddd; transition: transform 0.2s;">
+                            </div>
+                        ` : ''}
+                        ${data.documents?.receipt ? `
+                            <div class="doc-card">
+                                <p style="font-weight:600; font-size: 0.9em; margin-bottom: 5px;">Receipt</p>
+                                <img src="${data.documents.receipt}" class="doc-preview" onclick="window.open('${data.documents.receipt}', '_blank')" style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid #ddd; transition: transform 0.2s;">
+                            </div>
+                        ` : ''}
+                        ${data.documents?.annexA ? `
+                            <div class="doc-card">
+                                <p style="font-weight:600; font-size: 0.9em; margin-bottom: 5px;">Annex A (Form)</p>
+                                <img src="${data.documents.annexA}" class="doc-preview" onclick="window.open('${data.documents.annexA}', '_blank')" style="width: 100%; height: 150px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid #ddd; transition: transform 0.2s;">
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
 
@@ -373,15 +925,27 @@ export class AdminDashboard {
                         ${canApproveForReview ? '<button id="approve-review-btn" class="btn btn-primary">✓ Approve for Review</button>' : ''}
                         ${canFinalApprove ? '<button id="final-approve-btn" class="btn btn-primary">✓ Final Approval</button>' : ''}
                         ${data.status !== 'Rejected' ? '<button id="reject-app-btn" class="btn" style="background: #dc3545; color: white;">✗ Reject Application</button>' : ''}
+                        <button id="request-changes-btn" class="btn btn-outline" style="background: #fff3cd; color: #856404; border-color: #ffeeba;">Request Changes</button>
                         <button id="add-note-btn" class="btn btn-outline">Add Admin Note</button>
                     </div>
                 </div>
 
                 <div id="note-form" style="display: none; margin-top: 2rem;">
-                    <textarea id="admin-note-text" rows="3" style="width: 100%; padding: 1rem; border: 2px solid #ddd; border-radius: 8px;" placeholder="Enter admin note..."></textarea>
+                    <h4 style="margin-bottom: 10px;">Add Internal Note</h4>
+                    <textarea id="admin-note-text" rows="3" style="width: 100%; padding: 1rem; border: 2px solid #ddd; border-radius: 8px;" placeholder="Enter internal admin note..."></textarea>
                     <div style="margin-top: 1rem; display: flex; gap: 1rem;">
                         <button id="save-note-btn" class="btn btn-primary">Save Note</button>
                         <button id="cancel-note-btn" class="btn btn-outline">Cancel</button>
+                    </div>
+                </div>
+
+                <div id="request-changes-form" style="display: none; margin-top: 2rem; background: #fff3cd; padding: 20px; border-radius: 8px;">
+                    <h4 style="margin-bottom: 10px; color: #856404;">Request Changes from Applicant</h4>
+                    <p style="margin-bottom: 10px; font-size: 0.9rem; color: #666;">This note will be visible to the applicant and their status will be set to 'Returned'.</p>
+                    <textarea id="return-note-text" rows="3" style="width: 100%; padding: 1rem; border: 2px solid #ffeeba; border-radius: 8px;" placeholder="Explain what needs to be changed..."></textarea>
+                    <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+                        <button id="submit-return-btn" class="btn btn-primary" style="background: #856404; border-color: #856404;">Submit & Return Application</button>
+                        <button id="cancel-return-btn" class="btn btn-outline" style="background: white;">Cancel</button>
                     </div>
                 </div>
 
@@ -429,6 +993,7 @@ export class AdminDashboard {
 
         document.getElementById('add-note-btn')?.addEventListener('click', () => {
             document.getElementById('note-form')!.style.display = 'block';
+            document.getElementById('request-changes-form')!.style.display = 'none';
         });
 
         document.getElementById('cancel-note-btn')?.addEventListener('click', () => {
@@ -440,6 +1005,50 @@ export class AdminDashboard {
             if (noteText.trim()) {
                 await AdminDashboard.addAdminNote(appId, noteText, 'Admin');
                 modal.classList.remove('active');
+            }
+        });
+
+        // Request Changes Handlers
+        document.getElementById('request-changes-btn')?.addEventListener('click', () => {
+            document.getElementById('request-changes-form')!.style.display = 'block';
+            document.getElementById('note-form')!.style.display = 'none';
+        });
+
+        document.getElementById('cancel-return-btn')?.addEventListener('click', () => {
+            document.getElementById('request-changes-form')!.style.display = 'none';
+        });
+
+        document.getElementById('submit-return-btn')?.addEventListener('click', async () => {
+            const noteText = (document.getElementById('return-note-text') as HTMLTextAreaElement).value;
+            if (noteText.trim()) {
+                if (confirm('Return application to member for changes?')) {
+                    try {
+                        const appRef = doc(db, 'applications', appId);
+                        const docSnap = await getDoc(appRef);
+                        const currentNotes = docSnap.exists() ? (docSnap.data().adminNotes || []) : [];
+                        
+                        await updateDoc(appRef, {
+                            adminReviewStatus: 'returned',
+                            status: 'Returned for Changes',
+                            adminNotes: [
+                                ...currentNotes,
+                                {
+                                    note: `[RETURNED] ${noteText}`,
+                                    by: 'Admin (Request Changes)',
+                                    at: new Date().toISOString()
+                                }
+                            ],
+                            updatedAt: new Date().toISOString()
+                        });
+                        
+                        alert('Application returned to member.');
+                        modal.classList.remove('active');
+                    } catch (error: any) {
+                        alert('Error returning application: ' + error.message);
+                    }
+                }
+            } else {
+                alert('Please enter a reason for returning the application.');
             }
         });
     }
@@ -466,7 +1075,7 @@ export class AdminDashboard {
     static async addAdminNote(appId: string, note: string, adminName: string): Promise<void> {
         try {
             const appRef = doc(db, 'applications', appId);
-            const docSnap = await import('firebase/firestore').then(m => m.getDoc(appRef));
+            const docSnap = await getDoc(appRef);
             const currentNotes = docSnap.data()?.adminNotes || [];
             
             await updateDoc(appRef, {
@@ -483,6 +1092,24 @@ export class AdminDashboard {
             alert('Note added successfully!');
         } catch (error: any) {
             alert('Error adding note: ' + error.message);
+        }
+    }
+
+    /**
+     * Update contribution status
+     */
+    static async updateContributionStatus(contribId: string, status: string): Promise<void> {
+        try {
+            const docRef = doc(db, 'contributions', contribId);
+            await updateDoc(docRef, {
+                status: status,
+                reviewedAt: new Date().toISOString(),
+                // updatedBy: 'Admin' // basic audit
+            });
+            // The real-time listener will refresh the UI automatically
+        } catch (error: any) {
+            console.error('Error updating contribution:', error);
+            alert('Failed to update status: ' + error.message);
         }
     }
 }

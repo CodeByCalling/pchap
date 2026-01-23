@@ -69,7 +69,8 @@ h1, h2, h3, h4 {
   border: none;
   font-family: var(--font-heading);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  line-height: inherit;
+  font-size: 1rem;
 }
 
 .btn-primary {
@@ -375,7 +376,7 @@ tr:hover td {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: var(--primary);
+  color: var(--royal-blue);
 }
 
 .accordion-content {
@@ -387,15 +388,85 @@ tr:hover td {
 
 .accordion-item.active .accordion-content {
   max-height: 500px;
-  padding: 0 1.5rem 1.5rem;
+  padding: 1.5rem;
+  background: var(--soft-white);
+  border-top: 1px solid #eee;
+}
+
+/* Assistance Cards (Mobile) */
+.assistance-cards {
+  display: flex; /* Scrolling horizontal or Grid? Let's do Grid for simplicity unless scroll requested specifically */
+  flex-direction: column;
+  gap: 20px;
+}
+
+.assistance-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--soft-shadow);
+  border-left: 5px solid var(--gold);
+}
+
+.assistance-card h4 {
+  color: var(--royal-blue);
+  font-size: 1.25rem;
+  margin-bottom: 10px;
+}
+
+.assistance-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #eee;
+}
+
+.assistance-row:last-child {
+  border-bottom: none;
+  font-weight: 700;
+  color: var(--royal-blue-light);
+}
+
+.desktop-table {
+  display: table;
+}
+
+.mobile-cards {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktop-table { display: none; }
+  .mobile-cards { display: flex; flex-direction: column; gap: 15px; }
+  
+  /* Scrollable Card View enhancement if needed */
+  /* .mobile-cards { overflow-x: auto; flex-direction: row; padding-bottom: 20px; } */
 }
 
 /* Footer */
 footer {
   background: #F8F9FA;
-  padding: 4rem 0 2rem;
+  padding: 0; /* Remove padding to handle banner correctly */
   margin-top: auto;
-  border-top: 1px solid #eee;
+  border-top: none;
+}
+
+.legal-banner {
+  background: var(--gold);
+  color: var(--royal-blue);
+  text-align: center;
+  padding: 12px 20px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.footer-main {
+  padding: 4rem 20px 2rem;
+  max-width: var(--container-max-width);
+  margin: 0 auto;
 }
 
 .footer-content {
@@ -570,5 +641,109 @@ footer {
   }
   .page-title {
     font-size: 1.8rem;
+  }
+}
+
+/* --- Mobile Optimization Polish (Task 9) --- */
+
+/* 1. Prevent iOS Auto-Zoom */
+input, select, textarea {
+  font-size: 16px !important;
+}
+
+/* 2. Mobile Table to Card View */
+@media (max-width: 600px) {
+  table, thead, tbody, th, td, tr {
+    display: block;
+  }
+
+  /* Hide headers */
+  thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  tr {
+    margin-bottom: 20px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    padding: 15px;
+  }
+
+  /* Robust Mobile Beneficiary Table Styling */
+  #beneficiary-table td,
+  tr td {
+    border: none;
+    position: relative;
+    padding: 10px 15px !important;
+    display: flex !important;
+    flex-direction: column !important; /* Force stack */
+    align-items: flex-start !important;
+    justify-content: flex-start;
+    border-bottom: 1px solid #f0f0f0;
+    text-align: left;
+    height: auto !important;
+    min-height: 80px; /* Ensure space */
+  }
+
+  /* Target the label specifically */
+  #beneficiary-table td::before,
+  tr td::before {
+    position: relative !important;
+    left: 0;
+    top: 0;
+    transform: none;
+    width: 100%;
+    margin-bottom: 8px; /* Space between label and input */
+    white-space: nowrap;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--royal-blue);
+    text-align: left;
+    content: attr(data-label);
+    display: block !important;
+  }
+
+
+
+  /* Prevent overlap with label */
+  td > * {
+    max-width: 100%;
+    width: 100%; /* Full width inputs */
+    margin-left: 0; 
+  }
+
+  /* Adjustments for buttons inside table */
+  .view-receipt-btn {
+    width: 100%;
+    margin-top: 5px;
+    max-width: 100%; /* Override the general rule for button if needed, but 55% might be too small for button, let's keep it specific */
+  }
+  
+  /* Specific override for full-width elements if needed */
+  td button {
+      max-width: 100%;
+  }
+}
+
+/* 3. Dashboard Mobile Overrides (Migrated from member_dashboard.ts) */
+@media (max-width: 600px) {
+  .contribution-grid {
+      grid-template-columns: 1fr !important;
+      gap: 15px !important;
+  }
+  
+  .glass-card {
+      flex-direction: column;
+      text-align: center;
+      padding: 24px !important;
+  }
+  
+  /* Ensure buttons are large enough for touch targets */
+  button, select, input {
+      min-height: 44px;
   }
 }

@@ -4,9 +4,12 @@ import { PCHAPApplication } from './application'
 import { EndorsementSystem } from './endorsement'
 import { AdminDashboard } from './admin_dashboard'
 import { MemberDashboard } from './member_dashboard'
+import { ChatWidget } from './chat_widget'
 import { auth, db } from './firebase_config'
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth'
 import { doc, getDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore'
+import { Localization } from './localization'
+import { renderAssistanceTable, renderFAQAccordion, faqs } from './components/LandingPageComponents'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
@@ -18,25 +21,15 @@ let isAdmin = false; // We'll fetch this from a custom claim or Firestore
 let unsubscribeAdmin: (() => void) | null = null;
 
 
-const faqs = [
-  { q: "Is PCHAP an insurance product?", a: "No. PCHAP is not an insurance plan and is not regulated by the Insurance Commission of the Philippines. It is a faith-based, mutual aid program under J29 Corporation, designed to provide voluntary assistance based on fund availability." },
-  { q: "Are the benefits guaranteed?", a: "No. All assistance is subject to fund availability and the approval of the Board of Trustees. While PCHAP provides projected amounts, no benefit is promised or guaranteed." },
-  { q: "Why sign a waiver?", a: "The waiver ensures members understand the non-insurance nature of the program. It confirms that assistance is not guaranteed and contributions are non-refundable." },
-  { q: "What is PCHAP?", a: "PCHAP is a voluntary, community-based financial assistance program for pastors, full-time workers, and lay leaders within Jesus Reigns Ministries, funded by members and managed by J29 Corporation." },
-  { q: "Monthly contribution amount?", a: "Each active member is expected to contribute ₱500 per month. This must be consistent to remain eligible for assistance." },
-  { q: "Types of assistance available?", a: "Members may apply for medical/hospitalization aid, annual physical exam reimbursement (up to ₱2,000), and bereavement/funeral assistance." },
-  { q: "Waiting period for assistance?", a: "You must complete six (6) continuous months of contributions before becoming eligible to apply for any form of assistance." },
-  { q: "Effect of missed contributions?", a: "Failing to contribute for three (3) consecutive months may lead to suspension of eligibility until contributions are updated." },
-  { q: "Are contributions refundable?", a: "No. All contributions are non-refundable and non-transferable, regardless of membership duration or whether aid was received." },
-  { q: "Spouse and children coverage?", a: "Spouses join for the same ₱500/month. Children under 18 can be listed. Children 18+ must apply separately if eligible." },
-  { q: "Are retirees eligible?", a: "Yes. Retired JRM pastors and FTWs are eligible under the same requirements (₱500/month and 6-month waiting period)." },
-  { q: "How to apply for assistance?", a: "Submit an Assistance Request Form with supporting medical or official documents. All requests require Board approval." }
-];
+// FAQs moved to components/LandingPageComponents.ts
 
 // --- Components ---
 
 const renderNavbar = (active: string) => {
   const isAuth = !!currentUser;
+  const t = (k: any) => Localization.t(k);
+  const toggleIcon = Localization.currentLang === 'en' ? '🇵🇭' : '🇺🇸';
+
   return `
   <header>
     <nav class="container">
@@ -45,15 +38,16 @@ const renderNavbar = (active: string) => {
         <span class="logo-tagline">Pastor's Care Health Assistance Program</span>
       </a>
       <div class="nav-links">
-        <a href="#home" class="${active === 'home' ? 'active' : ''}">Home</a>
-        <a href="#about" class="${active === 'about' ? 'active' : ''}">About</a>
-        <a href="#rules" class="${active === 'rules' ? 'active' : ''}">Rules</a>
-        <a href="#faq" class="${active === 'faq' ? 'active' : ''}">FAQ</a>
-        <a href="#payment" class="${active === 'payment' ? 'active' : ''}">How to Pay</a>
-        <a href="#policy" class="${active === 'policy' ? 'active' : ''}">Policy Manual</a>
-        ${!isAuth ? '<a href="#login" class="btn btn-primary" style="padding: 8px 20px;">Login</a>' : 
-          `<a href="#dashboard" class="${active === 'dashboard' ? 'active' : ''}">Dashboard</a>
-           <a href="#" id="logout-btn" style="color: var(--gold); font-weight: 700;">Logout</a>`}
+        <a href="#home" class="${active === 'home' ? 'active' : ''}">${t('nav_home')}</a>
+        <a href="#about" class="${active === 'about' ? 'active' : ''}">${t('nav_about')}</a>
+        <a href="#rules" class="${active === 'rules' ? 'active' : ''}">${t('nav_rules')}</a>
+        <a href="#faq" class="${active === 'faq' ? 'active' : ''}">${t('nav_faq')}</a>
+        <a href="#payment" class="${active === 'payment' ? 'active' : ''}">${t('nav_payment')}</a>
+        <a href="#policy" class="${active === 'policy' ? 'active' : ''}">${t('nav_policy')}</a>
+        <button id="lang-toggle" style="background:none; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 32px; height: 32px; font-size: 1.2rem; cursor: pointer; margin-left: 10px; display: inline-flex; align-items: center; justify-content: center;" title="Switch Language">${toggleIcon}</button>
+        ${!isAuth ? `<a href="#login" class="btn btn-primary" style="padding: 8px 20px;">${t('nav_login')}</a>` : 
+          `<a href="#dashboard" class="${active === 'dashboard' ? 'active' : ''}">${t('nav_dashboard')}</a>
+           <a href="#" id="logout-btn" style="color: var(--gold); font-weight: 700;">${t('nav_logout')}</a>`}
       </div>
       <button class="mobile-menu-btn" aria-label="Toggle Menu">
         <span></span>
@@ -66,7 +60,10 @@ const renderNavbar = (active: string) => {
 
 const renderFooter = () => `
   <footer>
-    <div class="container">
+    <div class="legal-banner">
+      ⚠️ Mandatory Disclaimer: PCHAP is NOT an insurance product.
+    </div>
+    <div class="footer-main">
       <div class="footer-content">
         <div>
           <h3 style="color: var(--royal-blue); margin-bottom: 1rem;">PCHAP</h3>
@@ -88,7 +85,7 @@ const renderFooter = () => `
         </div>
       </div>
       <div class="footer-bottom">
-        &copy; 2025 PCHAP - Pastor's Care Health Assistance Program. Not an insurance product. Operated by J29 Foundation, Inc.
+        &copy; 2025 PCHAP - Pastor's Care Health Assistance Program. Not an insurance product. Operated by J29 Foundation, Inc. <span style="opacity: 0.5; font-size: 0.8rem; margin-left: 10px;">v1.2</span>
       </div>
     </div>
   </footer>
@@ -126,6 +123,9 @@ const routes: Record<string, () => string | Promise<string>> = {
         </div>
       </div>
     </section>
+
+    ${renderAssistanceTable()}
+    ${renderFAQAccordion(faqs.slice(0, 5))}
   `,
   about: () => `
     <div class="page-title-section">
@@ -171,34 +171,11 @@ const routes: Record<string, () => string | Promise<string>> = {
         </div>
       </div>
 
-      <div style="margin-top: 80px;">
-        <h2 class="section-title">Projected Assistance Table</h2>
-        <p style="margin-bottom: 30px; text-align: center; max-width: 800px; margin-left: auto; margin-right: auto;">
-          Non-guaranteed assistance coverage based on active membership size. All aid is subject to fund availability and Board approval.
-        </p>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Active Members</th>
-                <th>Monthly Fund</th>
-                <th>Annual Fund</th>
-                <th style="color: var(--gold-light);">Max Assistance</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${[100, 300, 500, 700, 1000].map(m => `
-                <tr>
-                  <td>${m} Members</td>
-                  <td>₱${(m * 500).toLocaleString()}</td>
-                  <td>₱${(m * 500 * 12).toLocaleString()}</td>
-                  <td style="font-weight: 700; color: var(--royal-blue-light);">Up to ₱${(m * 100).toLocaleString()}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>
+</section>
+      
+      ${renderAssistanceTable()}
+
+      <section class="container">
       <div style="text-align: center; margin-top: 40px;">
         <a href="#policy" class="btn btn-primary">View Full Policy Guidelines</a>
       </div>
@@ -526,6 +503,7 @@ const navigate = async () => {
   // Member Dashboard Logic
   if (routePath === 'dashboard' && !isAdmin) {
       MemberDashboard.initializeContributionForm();
+      MemberDashboard.initializeHealthQuestionnaire();
   }
 
   if (hash === 'faq') {
@@ -566,6 +544,12 @@ const navigate = async () => {
     });
   })
 
+  // Language Toggle
+  document.getElementById('lang-toggle')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    Localization.toggle();
+  });
+
   // Mobile menu logic
   const setupMobileMenu = () => {
     document.querySelectorAll('.mobile-menu-btn').forEach(btn => {
@@ -596,6 +580,9 @@ const navigate = async () => {
           appLogic.open();
       });
   });
+
+  // Initialize Smart-Counselor Chat Widget
+  new ChatWidget();
 }
 
 window.addEventListener('hashchange', navigate)

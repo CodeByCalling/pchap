@@ -1,7 +1,40 @@
 import { db } from './firebase_config';
-import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 
 export class EndorsementSystem {
+
+    /**
+     * Generate a secure endorsement link for an application
+     * Creates a token, saves it to 'endorsements' collection, and updates the application.
+     */
+    static async generateEndorsementLink(applicationId: string): Promise<string> {
+        // Generate a refined unique token (using crypto for better randomness)
+        const token = crypto.randomUUID();
+        
+        try {
+            // 1. Save to new 'endorsements' collection (Audit/Record)
+            await addDoc(collection(db, 'endorsements'), {
+                token: token,
+                applicationId: applicationId,
+                status: 'pending',
+                createdAt: new Date().toISOString()
+            });
+
+            // 2. Update Application with the token (Critical for Public Query Rule)
+            const applicationRef = doc(db, 'applications', applicationId);
+            await updateDoc(applicationRef, {
+                pastorEndorsementToken: token,
+                pastorEndorsementStatus: 'pending'
+            });
+
+            // 3. Return the full URL
+            const baseUrl = window.location.origin + window.location.pathname;
+            return `${baseUrl}#endorse?token=${token}`;
+        } catch (error) {
+            console.error("Error generating link:", error);
+            throw error;
+        }
+    }
     
     /**
      * Validate endorsement token and fetch associated application
@@ -9,6 +42,7 @@ export class EndorsementSystem {
     static async validateToken(token: string): Promise<any> {
         try {
             // Query applications collection for the endorsement token
+            // This works with the Firestore Rule: allow list if querying by pastorEndorsementToken
             const applicationsRef = collection(db, 'applications');
             const q = query(applicationsRef, where('pastorEndorsementToken', '==', token));
             const querySnapshot = await getDocs(q);
@@ -54,11 +88,13 @@ export class EndorsementSystem {
                 updatedAt: new Date().toISOString()
             };
 
-            // Update overall status
+            // Update overall status (Strictly following prompt)
             if (action === 'approve') {
-                updates.status = 'Pending Admin Review';
+                updates.status = 'pastor-approved';
+                updates.pastorEndorsementStatus = 'approved';
             } else {
-                updates.status = 'Rejected by Pastor';
+                updates.status = 'pastor-rejected';
+                updates.pastorEndorsementStatus = 'rejected';
             }
 
             await updateDoc(applicationRef, updates);
@@ -79,7 +115,7 @@ export class EndorsementSystem {
             <div class="endorsement-container">
                 <div class="endorsement-card">
                     <div class="endorsement-header">
-                        <h1>🙏 Pastor Endorsement Request</h1>
+                        <h1>🙏 Pastor Endorsement</h1>
                         <p class="subtext">Please review and verify this PCHAP membership application</p>
                     </div>
 
@@ -122,10 +158,10 @@ export class EndorsementSystem {
 
                     <div class="action-buttons">
                         <button id="approve-btn" class="btn btn-approve">
-                            ✓ Approve & Endorse
+                            Endorse
                         </button>
                         <button id="reject-btn" class="btn btn-reject">
-                            ✗ Reject Application
+                            Decline
                         </button>
                     </div>
 

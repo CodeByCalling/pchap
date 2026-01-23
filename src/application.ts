@@ -2,6 +2,7 @@ import { AddressService } from './philippine_address_data';
 import { auth, db, storage } from './firebase_config';
 import { doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export class PCHAPApplication {
     private currentStep: number = 1;
@@ -168,6 +169,10 @@ export class PCHAPApplication {
             document.body.style.overflow = 'hidden';
             this.currentStep = 1;
             this.showStep(1);
+            // Clear previous beneficiary rows to prevent accumulation
+            if (this.beneficiaryTableBody) this.beneficiaryTableBody.innerHTML = '';
+            // Add one empty row by default
+            this.addBeneficiaryRow();
         }
     }
 
@@ -178,10 +183,148 @@ export class PCHAPApplication {
         }
     }
 
-    private saveAndExit() {
-        // Mock save logic
-        alert('Application draft saved successfully. You can return later to complete your enrollment.');
-        this.close();
+    private async saveAndExit() {
+        console.log("Save and Exit clicked"); // Debug
+        const user = auth.currentUser;
+        
+        if (user) {
+            await this.performSave(user.uid);
+        } else {
+            // Pass a callback to save after login
+            this.showAuthPrompt(async (uid) => {
+                await this.performSave(uid);
+            });
+        }
+    }
+
+    private showAuthPrompt(onSuccess?: (uid: string) => Promise<void>) {
+        const modal = document.createElement('div');
+        modal.className = 'custom-auth-modal';
+        modal.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
+            z-index: 10000; backdrop-filter: blur(5px);
+        `;
+        
+        // Improved Modal UI with "Create Account" emphasis
+        modal.innerHTML = `
+            <div class="glass-card" style="background: white; max-width: 400px; padding: 30px; margin: 20px; text-align: center; border-radius: 16px; border-top: 5px solid #002366;">
+                <h3 style="margin-top:0; color: #002366;">Account Required</h3>
+                <p style="margin-bottom: 20px; color: #555;">To save your progress or submit, you must have an account.</p>
+                
+                <div style="display: flex; flex-direction: column; gap: 12px; text-align: left;">
+                    <label style="font-size: 0.85rem; font-weight: 600; color: #002366;">Email Address</label>
+                    <input type="email" id="auth-email" placeholder="example@email.com" style="padding: 12px; border-radius: 8px; border: 1px solid #ddd; width: 100%; box-sizing: border-box;">
+                    
+                    <label style="font-size: 0.85rem; font-weight: 600; color: #002366;">Password</label>
+                    <input type="password" id="auth-password" placeholder="Min. 6 characters" style="padding: 12px; border-radius: 8px; border: 1px solid #ddd; width: 100%; box-sizing: border-box;">
+                    
+                    <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                        <button id="auth-btn-login" class="btn btn-primary" style="width: 100%; background: linear-gradient(135deg, #002366 0%, #001a4d 100%); color: white;">Log In</button>
+                        <div style="text-align: center; font-size: 0.9rem; color: #666;">- OR -</div>
+                        <button id="auth-btn-signup" class="btn btn-outline" style="width: 100%;">Create Account</button>
+                    </div>
+                    
+                    <button id="auth-btn-cancel" style="background: none; border: none; color: #999; margin-top: 15px; cursor: pointer; text-decoration: underline; width: 100%;">Cancel</button>
+                </div>
+                <div id="auth-status-msg" style="margin-top: 15px; font-size: 0.9em; min-height: 20px;"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const emailInput = modal.querySelector('#auth-email') as HTMLInputElement;
+        const passInput = modal.querySelector('#auth-password') as HTMLInputElement;
+        const statusMsg = modal.querySelector('#auth-status-msg') as HTMLElement;
+
+        const cleanup = () => {
+            if (modal.parentNode) modal.parentNode.removeChild(modal);
+        };
+
+        modal.querySelector('#auth-btn-cancel')?.addEventListener('click', cleanup);
+
+        const handleAuth = async (action: 'login' | 'signup') => {
+            const email = emailInput.value;
+            const password = passInput.value;
+            
+            if (!email || !password) {
+                statusMsg.textContent = "Please enter both email and password.";
+                statusMsg.style.color = "red";
+                return;
+            }
+
+            statusMsg.textContent = action === 'signup' ? "Creating account..." : "Logging in...";
+            statusMsg.style.color = "#002366";
+
+            try {
+                let userCred;
+                if (action === 'login') {
+                    userCred = await signInWithEmailAndPassword(auth, email, password);
+                } else {
+                    userCred = await createUserWithEmailAndPassword(auth, email, password);
+                }
+                
+                statusMsg.textContent = "Success! Resuming...";
+                statusMsg.style.color = "green";
+                
+                // Execute callback if provided
+                if (onSuccess) {
+                    await onSuccess(userCred.user.uid);
+                }
+                
+                cleanup();
+
+            } catch (error: any) {
+                console.error("Auth Error:", error);
+                let msg = error.code ? error.code.replace('auth/', '').replace(/-/g, ' ') : error.message;
+                // Friendly errors
+                if (msg.includes('email already in use')) msg = "Email already registered. Please Log In.";
+                if (msg.includes('weak password')) msg = "Password must be at least 6 characters.";
+                
+                statusMsg.textContent = msg.charAt(0).toUpperCase() + msg.slice(1);
+                statusMsg.style.color = "red";
+            }
+        };
+
+        modal.querySelector('#auth-btn-login')?.addEventListener('click', () => handleAuth('login'));
+        modal.querySelector('#auth-btn-signup')?.addEventListener('click', () => handleAuth('signup'));
+    }
+
+    private async performSave(uid: string) {
+        if (!this.form) return;
+        
+        try {
+            const formData = new FormData(this.form);
+            const appData: any = {};
+            
+            // Extract core data simply
+            formData.forEach((value, key) => {
+                 if (key.includes('[]')) {
+                     const keyName = key.replace('[]', '');
+                     if (!appData[keyName]) appData[keyName] = [];
+                     appData[keyName].push(value);
+                 } else {
+                     appData[key] = value;
+                 }
+            });
+
+            // Set basic structure for Firestore
+            const finalDoc = {
+                draftData: appData, 
+                status: 'draft',
+                lastSaved: new Date(),
+                email: auth.currentUser?.email || appData['email'],
+                userId: uid
+            };
+
+            await setDoc(doc(db, "applications", uid), finalDoc, { merge: true });
+            
+            alert('Draft saved! You can resume later.');
+            this.close();
+
+        } catch (e) {
+            console.error("Save error:", e);
+            alert("Failed to save draft. Please try again.");
+        }
     }
 
     private showStep(step: number) {
@@ -282,29 +425,65 @@ export class PCHAPApplication {
                     <option value="Legal Guardian">Legal Guardian</option>
                 </select>
             </td>
-            <td><button type="button" class="btn-remove">&times;</button></td>
+            <td><button type="button" class="btn-remove" style="color: red; font-weight: bold; border: 1px solid red; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer;">&times;</button></td>
         `;
 
         // Beneficiary Birthday Validation (Must be < 18 years old)
         const dobInput = row.querySelector('input[name="b_dob[]"]') as HTMLInputElement;
-        dobInput.max = "2028-12-31"; 
+        // Approx max date (today) - though users might be born today
+        dobInput.max = new Date().toISOString().split('T')[0]; 
         
         dobInput.addEventListener('change', () => {
+             if (!dobInput.value) return; // Ignore empty/invalid
+
              const birthDate = new Date(dobInput.value);
              const today = new Date();
+             
+             // Check if valid date
+             if (isNaN(birthDate.getTime())) return;
+
              let age = today.getFullYear() - birthDate.getFullYear();
              const m = today.getMonth() - birthDate.getMonth();
              if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
                  age--;
              }
 
+             // Remove existing error if any
+             const existingError = row.querySelector('.age-error');
+             if (existingError) existingError.remove();
+             dobInput.style.borderColor = '';
+
+             // Only warn if strictly 18 or older
              if (age >= 18) {
-                 alert("For beneficiaries 18 years old and above, please encourage them to apply for their own PCHAP membership if eligible.");
+                 // Creating non-blocking UI error
+                 dobInput.style.borderColor = 'red';
+                 const errorMsg = document.createElement('span');
+                 errorMsg.className = 'age-error';
+                 errorMsg.style.color = 'red';
+                 errorMsg.style.fontSize = '0.75rem';
+                 errorMsg.style.display = 'block';
+                 errorMsg.style.marginTop = '4px';
+                 errorMsg.textContent = "Beneficiaries 18+ should apply for their own membership.";
+                 dobInput.parentNode?.appendChild(errorMsg);
+                 
                  dobInput.value = ''; // Clear input
+                 
+                 // Remove error after 3 seconds to clean up UI
+                 setTimeout(() => {
+                    if (errorMsg.parentNode) errorMsg.remove();
+                    dobInput.style.borderColor = '';
+                 }, 4000);
              }
         });
 
-        row.querySelector('.btn-remove')?.addEventListener('click', () => row.remove());
+        const removeBtn = row.querySelector('.btn-remove');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', (e) => {
+                e.preventDefault(); // Stop any form submission
+                row.remove();
+            });
+        }
+        
         this.beneficiaryTableBody.appendChild(row);
     }
 
@@ -339,7 +518,13 @@ export class PCHAPApplication {
 
         const user = auth.currentUser;
         if (!user) {
-            alert("You must be logged in to submit an application.");
+            // New: Show Auth Modal for Submit too
+            // Note: We don't auto-submit here to avoid complexity (upload files etc). 
+            // Better to let them click submit again after login, or try to resume.
+            // For now, let's just auth them.
+            this.showAuthPrompt(async (uid) => {
+                alert("Account created/logged in! Please click 'Submit Application' again to finalize.");
+            });
             return;
         }
 
@@ -359,7 +544,7 @@ export class PCHAPApplication {
                     const file = input.files?.[0];
                     if (file) {
                         const fileType = input.name; // idCard, photo, receipt
-                        const storageRef = ref(storage, `applicants/${user.uid}/${fileType}_${Date.now()}_${file.name}`);
+                        const storageRef = ref(storage, `uploads/${user.uid}/applicants/${fileType}_${Date.now()}_${file.name}`);
                         await uploadBytes(storageRef, file);
                         const url = await getDownloadURL(storageRef);
                         fileUrls[fileType] = url;
@@ -411,7 +596,7 @@ export class PCHAPApplication {
                     firstname: data.firstname,
                     civilStatus: data.civilStatus,
                     birthday: data.birthday,
-                    nationality: data.nationality,
+                    // nationality removed
                     address: {
                         houseStreet: data.houseStreet,
                         region: data.region,
@@ -424,7 +609,14 @@ export class PCHAPApplication {
                     sourceOfFunds: data.sourceOfFunds,
                     outreach: data.outreach,
                     govIdNo: data.govId,
-                    philhealthNo: data.philhealth
+                    philhealthNo: data.philhealth,
+                    // Supervisor Info
+                    supervisor: {
+                        name: data.supervisorName,
+                        role: data.supervisorRole,
+                        phone: data.supervisorPhone,
+                        email: data.supervisorEmail
+                    }
                 },
                 healthHistory: {
                     height: data.height,
