@@ -6,7 +6,7 @@ import { AdminDashboard } from './admin_dashboard'
 import { MemberDashboard } from './member_dashboard'
 import { ChatWidget } from './chat_widget'
 import { auth, db } from './firebase_config'
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth'
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User, sendPasswordResetEmail } from 'firebase/auth'
 import { doc, getDoc, collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { Localization } from './localization'
 import { renderAssistanceTable, renderFAQAccordion, faqs } from './components/LandingPageComponents'
@@ -30,13 +30,22 @@ const renderNavbar = (active: string) => {
   const t = (k: any) => Localization.t(k);
   const toggleIcon = Localization.currentLang === 'en' ? '🇵🇭' : '🇺🇸';
 
+  // Auth Button Logic
+  const authButton = !isAuth 
+    ? `<a href="#login" class="btn btn-primary" style="padding: 8px 20px; font-weight: bold; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.4); font-size: 0.85rem;">LOGIN / JOIN</a>` 
+    : `<div style="display: flex; align-items: center; gap: 10px;">
+         <a href="#dashboard" class="${active === 'dashboard' ? 'active' : ''}" style="color: white; text-decoration: none; font-weight: 500;">${t('nav_dashboard')}</a>
+       </div>`;
+
   return `
   <header>
-    <nav class="container">
+    <nav class="container" style="display: flex; justify-content: space-between; align-items: center;">
       <a href="#home" class="logo">
         <span class="logo-main"><span class="text-gold">PCHAP</span> <span style="color: white;">DIGITAL</span></span>
         <span class="logo-tagline">Pastor's Care Health Assistance Program</span>
       </a>
+      
+      <!-- Desktop Links (Hidden on Mobile) -->
       <div class="nav-links">
         <a href="#home" class="${active === 'home' ? 'active' : ''}">${t('nav_home')}</a>
         <a href="#about" class="${active === 'about' ? 'active' : ''}">${t('nav_about')}</a>
@@ -44,16 +53,22 @@ const renderNavbar = (active: string) => {
         <a href="#faq" class="${active === 'faq' ? 'active' : ''}">${t('nav_faq')}</a>
         <a href="#payment" class="${active === 'payment' ? 'active' : ''}">${t('nav_payment')}</a>
         <a href="#policy" class="${active === 'policy' ? 'active' : ''}">${t('nav_policy')}</a>
-        <button id="lang-toggle" style="background:none; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 32px; height: 32px; font-size: 1.2rem; cursor: pointer; margin-left: 10px; display: inline-flex; align-items: center; justify-content: center;" title="Switch Language">${toggleIcon}</button>
-        ${!isAuth ? `<a href="#login" class="btn btn-primary" style="padding: 8px 20px;">${t('nav_login')}</a>` : 
-          `<a href="#dashboard" class="${active === 'dashboard' ? 'active' : ''}">${t('nav_dashboard')}</a>
-           <a href="#" id="logout-btn" style="color: var(--gold); font-weight: 700;">${t('nav_logout')}</a>`}
+        ${isAuth ? `<a href="#" id="logout-btn" style="color: var(--gold); font-weight: 700;">${t('nav_logout')}</a>` : ''}
       </div>
-      <button class="mobile-menu-btn" aria-label="Toggle Menu">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+
+      <!-- Mobile/Header Actions (Always Visible) -->
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <button id="lang-toggle" style="background:none; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 32px; height: 32px; font-size: 1.2rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;" title="Switch Language">${toggleIcon}</button>
+        
+        <!-- Login Button is now here, separate from nav-links -->
+        ${authButton}
+
+        <button class="mobile-menu-btn" aria-label="Toggle Menu" style="margin-left: 10px;">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
     </nav>
   </header>
 `};
@@ -320,16 +335,7 @@ const routes: Record<string, () => string | Promise<string>> = {
   login: () => `
     <section class="container" style="display: flex; justify-content: center; align-items: center; min-height: 60vh;">
       <div class="card" style="width: 100%; max-width: 400px; padding: 40px;">
-        <h2 style="text-align: center; margin-bottom: 30px;">Member Sign In</h2>
-        
-        <div class="alert alert-info" style="margin-bottom: 25px; padding: 15px; background: #d1ecf1; border-left: 4px solid #0c5460; border-radius: 6px;">
-          <strong>Demo Accounts:</strong><br>
-          <small>
-            Admin: <code>admin@pchap.org</code><br>
-            Member: <code>member@pchap.org</code><br>
-            Password: <code>password123</code>
-          </small>
-        </div>
+        <h2 style="text-align: center; margin-bottom: 30px;" id="auth-title">Member Sign In</h2>
         
         <div id="login-form">
           <div class="form-group" style="margin-bottom: 20px;">
@@ -338,9 +344,20 @@ const routes: Record<string, () => string | Promise<string>> = {
           </div>
           <div class="form-group" style="margin-bottom: 30px;">
             <label>Password</label>
-            <input type="password" id="password" placeholder="Enter your password" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #ddd;">
+            <div style="position: relative;">
+              <input type="password" id="password" placeholder="Enter your password" style="width: 100%; padding: 12px; padding-right: 40px; border-radius: 8px; border: 1px solid #ddd;">
+              <button type="button" id="toggle-password" style="position: absolute; right: 5px; top: 50%; transform: translateY(-50%); cursor: pointer; background: none; border: none; font-size: 1.2rem; padding: 5px; z-index: 10;">👁️</button>
+            </div>
+            <div style="text-align: right; margin-top: 5px;">
+                <a href="#" id="forgot-password" style="font-size: 0.85rem; color: #666;">Forgot Password?</a>
+            </div>
           </div>
           <button id="do-login" class="btn btn-primary" style="width: 100%;">Sign In</button>
+          
+          <div style="text-align: center; margin-top: 20px; font-size: 0.9rem;">
+            <span id="auth-toggle-text">Don't have an account?</span> 
+            <a href="#" id="auth-toggle-btn" style="color: var(--royal-blue); font-weight: 600;">Create one</a>
+          </div>
         </div>
       </div>
     </section>
@@ -504,6 +521,8 @@ const navigate = async () => {
   if (routePath === 'dashboard' && !isAdmin) {
       MemberDashboard.initializeContributionForm();
       MemberDashboard.initializeHealthQuestionnaire();
+      MemberDashboard.initializeAddressUpdateForm();
+      MemberDashboard.initializeSupervisorActions();
   }
 
   if (hash === 'faq') {
@@ -516,24 +535,82 @@ const navigate = async () => {
 
   if (hash === 'login') {
     const loginBtn = document.getElementById('do-login')
+    const authTitle = document.getElementById('auth-title');
+    const authToggleBtn = document.getElementById('auth-toggle-btn');
+    const authToggleText = document.getElementById('auth-toggle-text');
+    let isLoginMode = true;
+
+    // Toggle Login / Signup
+    authToggleBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      isLoginMode = !isLoginMode;
+      
+      if (authTitle) authTitle.innerText = isLoginMode ? 'Member Sign In' : 'Create Account';
+      if (loginBtn) loginBtn.innerText = isLoginMode ? 'Sign In' : 'Sign Up';
+      if (authToggleText) authToggleText.innerText = isLoginMode ? "Don't have an account?" : "Already have an account?";
+      if (authToggleBtn) authToggleBtn.innerText = isLoginMode ? "Create one" : "Sign In";
+    });
+
     loginBtn?.addEventListener('click', async () => {
       const email = (document.getElementById('username') as HTMLInputElement).value
       const password = (document.getElementById('password') as HTMLInputElement).value
       
       const btn = loginBtn as HTMLButtonElement;
       btn.disabled = true;
-      btn.innerText = "Signing in...";
+      btn.innerText = isLoginMode ? "Signing in..." : "Creating Account...";
 
       try {
-        await signInWithEmailAndPassword(auth, email, password);
+        if (isLoginMode) {
+            await signInWithEmailAndPassword(auth, email, password);
+        } else {
+            // New: Import createUser... if needed, but it's likely already imported or available
+            // Note: need to ensure import at top of file
+             const { createUserWithEmailAndPassword } = await import('firebase/auth');
+             await createUserWithEmailAndPassword(auth, email, password);
+        }
+        
         // Navigate handled by onAuthStateChanged
         window.location.hash = 'dashboard';
       } catch (error: any) {
-        alert("Login Failed: " + error.message);
+        let msg = error.code ? error.code.replace('auth/', '').replace(/-/g, ' ') : error.message;
+        alert((isLoginMode ? "Login Failed: " : "Signup Failed: ") + msg);
         btn.disabled = false;
-        btn.innerText = "Sign In";
+        btn.innerText = isLoginMode ? "Sign In" : "Sign Up";
       }
     })
+
+    // Forgot Password Handler
+    document.getElementById('forgot-password')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const email = (document.getElementById('username') as HTMLInputElement).value;
+        if (!email) {
+            alert('Please enter your email address first.');
+            return;
+        }
+        if (!confirm(`Send password reset email to ${email}?`)) return;
+
+        try {
+            await sendPasswordResetEmail(auth, email);
+            alert('Password reset email sent! Please check your inbox.');
+        } catch (error: any) {
+            alert('Error: ' + error.message);
+        }
+    });
+    document.getElementById('lang-toggle')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        Localization.toggle();
+    });
+
+    // Password Toggle Logic
+    const togglePassword = document.getElementById('toggle-password');
+    const passwordInput = document.getElementById('password') as HTMLInputElement;
+
+    togglePassword?.addEventListener('click', (e) => {
+        e.preventDefault(); // Prevent accidental form submission
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        togglePassword.innerText = type === 'password' ? '👁️' : '🙈';
+    });
   }
 
   // Logout listener

@@ -196,7 +196,7 @@ export const onApplicationStatusChange = functions.firestore
             }
         }
         
-        // Check for Returned/Rejected Trigger
+        // Check for Return/Rejected Trigger
         if ((before.adminReviewStatus !== 'rejected' && after.adminReviewStatus === 'rejected') || 
             (before.adminReviewStatus !== 'returned' && after.adminReviewStatus === 'returned')) {
              
@@ -215,6 +215,24 @@ export const onApplicationStatusChange = functions.firestore
                  );
              }
         }
+
+        // Supervisor Confirmation Trigger
+        if (before.pastorEndorsementStatus !== 'approved' && after.pastorEndorsementStatus === 'approved') {
+            const supervisor = after.personalInfo?.supervisor;
+            const applicantName = `${after.personalInfo?.firstname} ${after.personalInfo?.surname}`;
+            
+            if (supervisor?.email) {
+                const { sendSupervisorConfirmation } = await import('./emailService');
+                await sendSupervisorConfirmation(
+                    supervisor.email, 
+                    supervisor.name || 'Pastor', 
+                    applicantName, 
+                    'approved'
+                );
+                console.log(`Sent supervisor confirmation to ${supervisor.email}`);
+            }
+        }
+        
         return null;
     });
 
@@ -273,3 +291,76 @@ export const onContributionStatusChange = functions.firestore
         }
         return null;
     });
+// 4. Manual Trigger: Resend Supervisor Email
+export const resendSupervisorEmail = functions.https.onCall(async (data, context) => {
+    // Authentication Check
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+
+    const { applicantId, newEmail } = data;
+    if (!applicantId) {
+        throw new functions.https.HttpsError('invalid-argument', 'Missing applicantId.');
+    }
+
+    try {
+        const docRef = db.collection('applications').doc(applicantId);
+        const docSnap = await docRef.get();
+
+        if (!docSnap.exists) {
+            throw new functions.https.HttpsError('not-found', 'Application not found.');
+        }
+
+        const appData = docSnap.data();
+        
+        // Authorization: Owner OR Admin
+        const isOwner = context.auth.uid === applicantId;
+        const isAdmin = context.auth.token.email && (context.auth.token.email.includes('admin') || context.auth.token.email === 'osher@pchap.org'); // Basic admin check
+        
+        if (!isOwner && !isAdmin) {
+             throw new functions.https.HttpsError('permission-denied', 'Not authorized.');
+        }
+
+        let supervisor = appData?.personalInfo?.supervisor;
+        
+        // Update Email if provided
+        if (newEmail) {
+            await docRef.update({
+                'personalInfo.supervisor.email': newEmail
+            });
+            // Update local object for sending
+            if (!supervisor) supervisor = {};
+            supervisor.email = newEmail;
+        }
+
+        if (!supervisor || !supervisor.email) {
+            throw new functions.https.HttpsError('failed-precondition', 'No supervisor email found in application.');
+        }
+
+        // Generate the endorsement link again
+        // Note: The token should already exist in the doc.
+        const token = appData?.pastorEndorsementToken;
+        if (!token) {
+             throw new functions.https.HttpsError('failed-precondition', 'Endorsement token missing. Please contact support.');
+        }
+        
+        // Construct Link (Assuming hardcoded for now or based on request origin if possible, but cloud functions don't know client origin easily. Using production URL or config.)
+        // Ideally pass origin from client, but for security, we use known domain.
+        const origin = "https://pchap.site"; // Hardcoded for production safety
+        const endorsementLink = `${origin}/#endorse?token=${token}`;
+
+        const { sendSupervisorRequest } = await import('./emailService');
+        await sendSupervisorRequest(
+            supervisor.email,
+            supervisor.name || 'Pastor',
+            `${appData?.personalInfo?.firstname} ${appData?.personalInfo?.surname}`,
+            endorsementLink
+        );
+
+        return { success: true, message: `Email sent to ${supervisor.email}` };
+
+    } catch (error: any) {
+        console.error('Error resending supervisor email:', error);
+        throw new functions.https.HttpsError('internal', error.message);
+    }
+});

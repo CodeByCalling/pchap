@@ -1,7 +1,9 @@
-import { db, storage, auth } from './firebase_config';
-import { doc, getDoc, collection, query, where, orderBy, getDocs, addDoc, Timestamp } from 'firebase/firestore';
+import { db, storage, auth, functions } from './firebase_config';
+import { doc, getDoc, collection, query, where, orderBy, getDocs, addDoc, setDoc, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
 import { Localization } from './localization';
+import { PsgcService } from './utils/psgc_service';
 
 export class MemberDashboard {
     
@@ -33,9 +35,13 @@ export class MemberDashboard {
             const this_eligibility = this.calculateEligibility(contributions);
 
             return this.renderHTML(application, contributions, this_eligibility, userId, hasHealthInfo);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error fetching member data:', error);
-            return this.renderError();
+            // Check for index error specifically
+            const msg = error.code === 'failed-precondition' && error.message.includes('index') 
+                ? 'System is currently building necessary database indexes. Please try again in a few minutes.\n' + error.message
+                : error.message;
+            return this.renderError(msg);
         }
     }
 
@@ -84,6 +90,9 @@ export class MemberDashboard {
     /**
      * Render HTML
      */
+    /**
+     * Render HTML
+     */
     private static renderHTML(application: any, contributions: any[], eligibility: any, userId: string, hasHealthInfo: boolean): string {
         const user = auth.currentUser;
         const userName = application?.personalInfo?.firstname 
@@ -104,8 +113,8 @@ export class MemberDashboard {
 
                 ${application ? this.renderApplicationStatus(application) : this.renderNoApplication()}
 
-                <!-- Health Questionnaire (Annex C) -->
-                ${application ? this.renderHealthQuestionnaire(hasHealthInfo) : ''}
+                <!-- Address Revision Alert -->
+                ${application?.personalInfo?.address?.revisionRequired ? this.renderAddressRevisionAlert() : ''}
 
                 <!-- Eligibility Tracker -->
                 ${this.renderEligibilityTracker(eligibility)}
@@ -127,45 +136,55 @@ export class MemberDashboard {
         `;
     }
 
-    // ... (renderApplicationStatus, renderNoApplication, renderEligibilityTracker REMAIN UNCHANGED - omitting for brevity if possible, but replace_file_content needs context. 
-    // Wait, replace_file_content replaces the BLOCK. I need to be careful not to delete methods I'm not pasting back.
-    // I will target SPECIFIC BLOCKS instead of the whole file to be safe.)
-
-
     /**
      * Render application status
      */
     private static renderApplicationStatus(application: any): string {
         const adminNotes = application.adminNotes || [];
         const t = (k: any) => Localization.t(k);
+        
+        // Safety checks for status fields
+        const pastorStatus = application.pastorEndorsementStatus || 'pending';
+        const adminStatus = application.adminReviewStatus || 'pending';
+        const finalStatus = application.finalApprovalStatus || 'pending';
+        const globalStatus = application.status || 'draft';
+        const isDraft = globalStatus === 'draft';
 
         return `
             <div class="card" style="margin-bottom: 30px;">
                 <h3 style="color: var(--royal-blue); margin-bottom: 20px;">📋 Application Status</h3>
                 
+                <div style="margin-bottom: 20px;">
+                    ${(isDraft || adminStatus === 'returned') 
+                        ? `<button class="btn btn-primary nav-cta" style="width: 100%; margin-bottom: 15px;">Continue Application</button>` 
+                        : `<button class="btn btn-outline nav-cta" style="width: 100%; margin-bottom: 15px;">View Application</button>`
+                    }
+                </div>
+                
                 <div class="status-timeline">
-                    <div class="timeline-step ${application.status.includes('Pending Pastor') ? 'active' : application.pastorEndorsementStatus === 'approved' ? 'completed' : application.pastorEndorsementStatus === 'rejected' ? 'rejected' : ''}">
-                        <div class="step-icon">${application.pastorEndorsementStatus === 'approved' ? '✓' : application.pastorEndorsementStatus === 'rejected' ? '✗' : '1'}</div>
+                    <div class="timeline-step ${globalStatus.includes('Pending Pastor') ? 'active' : pastorStatus === 'approved' ? 'completed' : pastorStatus === 'rejected' ? 'rejected' : ''}">
+                        <div class="step-icon">${pastorStatus === 'approved' ? '✓' : pastorStatus === 'rejected' ? '✗' : '1'}</div>
                         <div class="step-content">
                             <h4>Pastor Endorsement</h4>
-                            <p class="status-badge status-${application.pastorEndorsementStatus}">${application.pastorEndorsementStatus.toUpperCase()}</p>
+                            <p class="status-badge status-${pastorStatus}">${pastorStatus.toUpperCase()}</p>
+                            ${(!isDraft && pastorStatus === 'pending') ? `<button id="resend-supervisor-btn" class="btn-text" style="font-size: 0.8rem; text-decoration: underline; margin-top: 5px; color: var(--royal-blue); cursor: pointer; background: none; border: none; padding: 0;">Resend Request</button>` : ''}
                             ${application.pastorEndorsementNotes ? `<p class="note">${application.pastorEndorsementNotes}</p>` : ''}
                         </div>
                     </div>
 
-                    <div class="timeline-step ${application.adminReviewStatus === 'pending' && application.pastorEndorsementStatus === 'approved' ? 'active' : application.adminReviewStatus === 'approved' ? 'completed' : application.adminReviewStatus === 'rejected' ? 'rejected' : ''}">
-                        <div class="step-icon">${application.adminReviewStatus === 'approved' ? '✓' : application.adminReviewStatus === 'rejected' ? '✗' : '2'}</div>
+                    <div class="timeline-step ${adminStatus === 'pending' && pastorStatus === 'approved' ? 'active' : adminStatus === 'approved' ? 'completed' : adminStatus === 'rejected' ? 'rejected' : ''}">
+                        <div class="step-icon">${adminStatus === 'approved' ? '✓' : adminStatus === 'rejected' ? '✗' : '2'}</div>
                         <div class="step-content">
                             <h4>Admin Review</h4>
-                            <p class="status-badge status-${application.adminReviewStatus}">${application.adminReviewStatus.toUpperCase()}</p>
+                            <p class="status-badge status-${adminStatus}">${adminStatus.toUpperCase()}</p>
                         </div>
                     </div>
 
-                    <div class="timeline-step ${application.finalApprovalStatus === 'pending' && application.adminReviewStatus === 'approved' ? 'active' : application.finalApprovalStatus === 'approved' ? 'completed' : application.finalApprovalStatus === 'rejected' ? 'rejected' : ''}">
-                        <div class="step-icon">${application.finalApprovalStatus === 'approved' ? '✓' : application.finalApprovalStatus === 'rejected' ? '✗' : '3'}</div>
+                    <div class="timeline-step ${finalStatus === 'pending' && adminStatus === 'approved' ? 'active' : finalStatus === 'approved' ? 'completed' : finalStatus === 'rejected' ? 'rejected' : ''}">
+                        <div class="step-icon">${finalStatus === 'approved' ? '✓' : finalStatus === 'rejected' ? '✗' : '3'}</div>
                         <div class="step-content">
                             <h4>Final Approval</h4>
-                            <p class="status-badge status-${application.finalApprovalStatus}">${application.finalApprovalStatus.toUpperCase()}</p>
+                            <p class="status-badge status-${finalStatus}">${finalStatus.toUpperCase()}</p>
                         </div>
                     </div>
                 </div>
@@ -200,43 +219,52 @@ export class MemberDashboard {
     }
 
     private static renderHealthQuestionnaire(isCompleted: boolean): string {
-        const t = (k: any) => Localization.t(k);
-        if (isCompleted) {
-            return `
-                <div class="card" style="margin-bottom: 30px;">
-                    <h3 style="color: var(--royal-blue); margin-bottom: 15px;">🔒 Private Health Questionnaire (Annex C)</h3>
-                    <div style="padding: 15px; background: #d4edda; border-left: 4px solid #28a745; border-radius: 6px;">
-                        <strong style="color: #155724;">✓ Submitted</strong>
-                        <p style="margin: 5px 0 0 0; color: #155724;">Your confidential health data has been securely recorded.</p>
-                    </div>
-                </div>
-            `;
-        }
+         // Health Questionnaire is now integrated into the main application wizard.
+         // We no longer render it separately here to comply with "submit all at once" requirement.
+         return '';
+    }
 
+    private static renderAddressRevisionAlert(): string {
         return `
-            <div class="card" style="margin-bottom: 30px; border-left: 5px solid var(--gold);">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
-                        <h3 style="color: var(--royal-blue); margin-bottom: 10px;">🔒 Private Health Questionnaire (Annex C)</h3>
-                        <p style="margin-bottom: 20px; color: #666;">
-                            Please complete this strictly confidential health history form. <br><strong>Security Note:</strong> This data is encrypted and accessible strictly to the Board and Medical Reviewers only.
+            <div class="card" style="margin-bottom: 30px; border-left: 5px solid #dc3545; background-color: #fff8f8;">
+                <div style="display: flex; gap: 20px; align-items: start;">
+                    <div style="font-size: 2rem;">⚠️</div>
+                    <div style="flex: 1;">
+                        <h3 style="color: #dc3545; margin-bottom: 10px;">Action Required: Update Address</h3>
+                        <p style="margin-bottom: 15px;">
+                            Your current address record requires an update to match the new DTI / PSGC standards. 
+                            Please re-select your location to ensure accurate delivery of benefits.
                         </p>
+                        
+                        <form id="update-address-form" style="background: white; padding: 20px; border-radius: 8px; border: 1px solid #eee;">
+                            <div class="form-group-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div class="form-group" style="grid-column: span 2;">
+                                    <label>House No. / Street / Block / Lot</label>
+                                    <input type="text" id="update-houseStreet" required placeholder="Detailed street address" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                                </div>
+                                <div class="form-group">
+                                    <label>Region</label>
+                                    <select id="update-region" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Province</label>
+                                    <select id="update-province" required disabled style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>City / Municipality</label>
+                                    <select id="update-city" required disabled style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Barangay</label>
+                                    <select id="update-barangay" required disabled style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></select>
+                                </div>
+                            </div>
+                            <div style="margin-top: 15px; text-align: right;">
+                                <button type="submit" id="btn-update-address" class="btn btn-primary">Update Address Record</button>
+                            </div>
+                        </form>
                     </div>
-                    <span style="background: #fff3cd; color: #856404; padding: 5px 10px; border-radius: 4px; font-size: 0.8em; font-weight: 600;">Action Required</span>
                 </div>
-
-                <form id="health-questionnaire-form">
-                    ${this.renderHealthToggle("Cardiovascular History", "cardio", "Heart disease, hypertension, etc.")}
-                    ${this.renderHealthToggle("Endocrine History", "endocrine", "Diabetes, thyroid disorders, etc.")}
-                    ${this.renderHealthToggle("Respiratory History", "respiratory", "Asthma, tuberculosis, COPD, etc.")}
-                    ${this.renderHealthToggle("Renal History", "renal", "Kidney stones, infection, failure, etc.")}
-
-                    <div id="health-submit-error" style="color: #dc3545; margin-bottom: 15px; display: none;"></div>
-                    
-                    <button type="submit" id="submit-health-btn" class="btn btn-primary">
-                        Submit Confidential Record
-                    </button>
-                </form>
             </div>
         `;
     }
@@ -412,12 +440,15 @@ export class MemberDashboard {
     /**
      * Render error state
      */
-    private static renderError(): string {
+    private static renderError(message: string = ''): string {
         return `
             <section class="container">
                 <div class="card" style="text-align: center; padding: 40px;">
                     <h3 style="color: #dc3545; margin-bottom: 15px;">Error Loading Dashboard</h3>
-                    <p>Unable to fetch your membership data. Please try refreshing the page.</p>
+                    <p>Unable to fetch your membership data.</p>
+                    ${message ? `<div style="background:#f8d7da; color:#721c24; padding:10px; margin-top:20px; border-radius:4px; font-family:monospace; font-size:0.85rem; text-align:left; overflow:auto;">${message}</div>` : ''}
+                    <button onclick="window.location.reload()" class="btn btn-outline" style="margin-top: 20px;">Try Refreshing</button>
+                    ${message.includes('index') ? '<p style="margin-top:10px; font-size:0.8rem; color:#666;">Note: If this is a new deployment, indexes may still be building.</p>' : ''}
                 </div>
             </section>
         `;
@@ -615,6 +646,179 @@ export class MemberDashboard {
                 errorDiv.style.display = 'block';
                 submitBtn.disabled = false;
                 submitBtn.innerText = 'Submit Confidential Record';
+            }
+        });
+    }
+
+    public static initializeAddressUpdateForm() {
+        const form = document.getElementById('update-address-form');
+         // This form is only rendered if renderAddressRevisionAlert is called.
+        if (!form) return;
+        
+        const regionSelect = document.getElementById('update-region') as HTMLSelectElement;
+        const provinceSelect = document.getElementById('update-province') as HTMLSelectElement;
+        const citySelect = document.getElementById('update-city') as HTMLSelectElement;
+        const barangaySelect = document.getElementById('update-barangay') as HTMLSelectElement;
+
+        // Reset helpers
+        const reset = (el: HTMLSelectElement) => {
+             el.innerHTML = '<option value="">Select Option</option>';
+             el.disabled = true;
+        }
+
+        // 1. Load Regions
+        const regions = PsgcService.getRegions();
+        regionSelect.innerHTML = '<option value="">Select Region</option>';
+        regions.forEach(r => {
+             const opt = document.createElement('option');
+             opt.value = r.code;
+             opt.innerText = r.name;
+             regionSelect.appendChild(opt);
+        });
+
+        // 2. Event Listeners
+        regionSelect?.addEventListener('change', () => {
+             reset(provinceSelect); reset(citySelect); reset(barangaySelect);
+             const code = regionSelect.value;
+             if (code) {
+                 const provinces = PsgcService.getProvinces(code);
+                 if (provinces.length > 0) {
+                     provinceSelect.disabled = false;
+                     provinces.forEach(p => {
+                         const opt = document.createElement('option');
+                         opt.value = p.code;
+                         opt.innerText = p.name;
+                         provinceSelect.appendChild(opt);
+                     });
+                     
+                     // NCR optimization
+                     if (provinces.length === 1) {
+                         provinceSelect.value = provinces[0].code;
+                         provinceSelect.dispatchEvent(new Event('change'));
+                     }
+                 }
+             }
+        });
+
+        provinceSelect?.addEventListener('change', () => {
+             reset(citySelect); reset(barangaySelect);
+             const code = provinceSelect.value;
+             const regionCode = regionSelect.value;
+             if (code) {
+                 const cities = PsgcService.getCities(code, regionCode);
+                 if (cities.length > 0) {
+                     citySelect.disabled = false;
+                     cities.forEach(c => {
+                         const opt = document.createElement('option');
+                         opt.value = c.code;
+                         opt.innerText = c.name;
+                         citySelect.appendChild(opt);
+                     });
+                 }
+             }
+        });
+
+        citySelect?.addEventListener('change', () => {
+             reset(barangaySelect);
+             const code = citySelect.value;
+             const regionCode = regionSelect.value;
+             const provinceCode = provinceSelect.value;
+             
+             if (code) {
+                 const barangays = PsgcService.getBarangays(code, provinceCode, regionCode);
+                 if (barangays.length > 0) {
+                     barangaySelect.disabled = false;
+                     barangays.forEach(b => {
+                         const opt = document.createElement('option');
+                         opt.value = b.code;
+                         opt.innerText = b.name;
+                         barangaySelect.appendChild(opt);
+                     });
+                 }
+             }
+        });
+
+        // 3. Submit Handler
+        form.addEventListener('submit', async (e) => {
+             e.preventDefault();
+             const btn = document.getElementById('btn-update-address') as HTMLButtonElement;
+             btn.disabled = true;
+             btn.innerText = "Updating Address...";
+
+             try {
+                 const houseStreet = (document.getElementById('update-houseStreet') as HTMLInputElement).value;
+                 const region = regionSelect.options[regionSelect.selectedIndex].text;
+                 const province = provinceSelect.options[provinceSelect.selectedIndex].text;
+                 const city = citySelect.options[citySelect.selectedIndex].text;
+                 const barangay = barangaySelect.options[barangaySelect.selectedIndex].text;
+
+                 if (!houseStreet || !regionSelect.value || !provinceSelect.value || !citySelect.value || !barangaySelect.value) {
+                     throw new Error("Please complete all address fields.");
+                 }
+
+                 if (auth.currentUser) {
+                     await setDoc(doc(db, "applications", auth.currentUser.uid), {
+                         personalInfo: {
+                             address: {
+                                 houseStreet, region, province, city, barangay,
+                                 updatedAt: new Date().toISOString()
+                             }
+                         }
+                     }, { merge: true });
+                     
+                     alert("Address updated successfully!");
+                     window.location.reload();
+                 }
+
+             } catch (error: any) {
+                 alert("Error updating address: " + error.message);
+             } finally {
+                 btn.disabled = false;
+                 btn.innerText = "Update Address Record";
+             }
+        });
+    }
+
+    public static initializeSupervisorActions() {
+        const btn = document.getElementById('resend-supervisor-btn');
+        if (!btn) return;
+
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            const originalText = btn.innerText;
+            btn.innerText = 'Sending...';
+            (btn as HTMLButtonElement).disabled = true;
+
+            try {
+                const user = auth.currentUser;
+                if (!user) throw new Error("Not logged in");
+
+                // Option to edit email
+                let options: any = { applicantId: user.uid };
+                if (confirm("Would you like to correct the Supervisor's email address before resending?")) {
+                    const newEmail = prompt("Enter the correct Supervisor Email:", "");
+                    if (newEmail) {
+                        if (newEmail.includes('@') && newEmail.includes('.')) {
+                             options.newEmail = newEmail;
+                        } else {
+                            alert("Invalid email format. Cancelled.");
+                            (btn as HTMLButtonElement).disabled = false;
+                            btn.innerText = originalText;
+                            return;
+                        }
+                    }
+                }
+
+                const resendFunc = httpsCallable(functions, 'resendSupervisorEmail');
+                await resendFunc(options);
+                
+                alert('✅ Endorsement request re-sent successfully!');
+            } catch (error: any) {
+                console.error("Resend error:", error);
+                alert('Failed to send: ' + error.message);
+            } finally {
+                btn.innerText = originalText;
+                (btn as HTMLButtonElement).disabled = false;
             }
         });
     }

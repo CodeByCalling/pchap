@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onContributionStatusChange = exports.onApplicationStatusChange = exports.sendPaymentReminder = exports.chatWithCounselor = void 0;
+exports.resendSupervisorEmail = exports.onContributionStatusChange = exports.onApplicationStatusChange = exports.sendPaymentReminder = exports.chatWithCounselor = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const generative_ai_1 = require("@google/generative-ai");
@@ -135,7 +135,7 @@ exports.sendPaymentReminder = functions.pubsub.schedule('0 9 * * *')
 exports.onApplicationStatusChange = functions.firestore
     .document('applications/{userId}')
     .onUpdate(async (change, context) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const before = change.before.data();
     const after = change.after.data();
     const userId = context.params.userId;
@@ -162,7 +162,7 @@ exports.onApplicationStatusChange = functions.firestore
             });
         }
     }
-    // Check for Returned/Rejected Trigger
+    // Check for Return/Rejected Trigger
     if ((before.adminReviewStatus !== 'rejected' && after.adminReviewStatus === 'rejected') ||
         (before.adminReviewStatus !== 'returned' && after.adminReviewStatus === 'returned')) {
         const email = ((_d = after.personalInfo) === null || _d === void 0 ? void 0 : _d.email) || after.email;
@@ -173,6 +173,16 @@ exports.onApplicationStatusChange = functions.firestore
                 `Please log in to your dashboard to view the Admin Notes and update your application accordingly.\n\n` +
                 `Login here: https://pchap.com/ \n\n` +
                 `Thank you,\nPCHAP Admin Team`);
+        }
+    }
+    // Supervisor Confirmation Trigger
+    if (before.pastorEndorsementStatus !== 'approved' && after.pastorEndorsementStatus === 'approved') {
+        const supervisor = (_f = after.personalInfo) === null || _f === void 0 ? void 0 : _f.supervisor;
+        const applicantName = `${(_g = after.personalInfo) === null || _g === void 0 ? void 0 : _g.firstname} ${(_h = after.personalInfo) === null || _h === void 0 ? void 0 : _h.surname}`;
+        if (supervisor === null || supervisor === void 0 ? void 0 : supervisor.email) {
+            const { sendSupervisorConfirmation } = await Promise.resolve().then(() => require('./emailService'));
+            await sendSupervisorConfirmation(supervisor.email, supervisor.name || 'Pastor', applicantName, 'approved');
+            console.log(`Sent supervisor confirmation to ${supervisor.email}`);
         }
     }
     return null;
@@ -224,5 +234,62 @@ exports.onContributionStatusChange = functions.firestore
         }
     }
     return null;
+});
+// 4. Manual Trigger: Resend Supervisor Email
+exports.resendSupervisorEmail = functions.https.onCall(async (data, context) => {
+    var _a, _b, _c;
+    // Authentication Check
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+    const { applicantId, newEmail } = data;
+    if (!applicantId) {
+        throw new functions.https.HttpsError('invalid-argument', 'Missing applicantId.');
+    }
+    try {
+        const docRef = db.collection('applications').doc(applicantId);
+        const docSnap = await docRef.get();
+        if (!docSnap.exists) {
+            throw new functions.https.HttpsError('not-found', 'Application not found.');
+        }
+        const appData = docSnap.data();
+        // Authorization: Owner OR Admin
+        const isOwner = context.auth.uid === applicantId;
+        const isAdmin = context.auth.token.email && (context.auth.token.email.includes('admin') || context.auth.token.email === 'osher@pchap.org'); // Basic admin check
+        if (!isOwner && !isAdmin) {
+            throw new functions.https.HttpsError('permission-denied', 'Not authorized.');
+        }
+        let supervisor = (_a = appData === null || appData === void 0 ? void 0 : appData.personalInfo) === null || _a === void 0 ? void 0 : _a.supervisor;
+        // Update Email if provided
+        if (newEmail) {
+            await docRef.update({
+                'personalInfo.supervisor.email': newEmail
+            });
+            // Update local object for sending
+            if (!supervisor)
+                supervisor = {};
+            supervisor.email = newEmail;
+        }
+        if (!supervisor || !supervisor.email) {
+            throw new functions.https.HttpsError('failed-precondition', 'No supervisor email found in application.');
+        }
+        // Generate the endorsement link again
+        // Note: The token should already exist in the doc.
+        const token = appData === null || appData === void 0 ? void 0 : appData.pastorEndorsementToken;
+        if (!token) {
+            throw new functions.https.HttpsError('failed-precondition', 'Endorsement token missing. Please contact support.');
+        }
+        // Construct Link (Assuming hardcoded for now or based on request origin if possible, but cloud functions don't know client origin easily. Using production URL or config.)
+        // Ideally pass origin from client, but for security, we use known domain.
+        const origin = "https://pchap.site"; // Hardcoded for production safety
+        const endorsementLink = `${origin}/#endorse?token=${token}`;
+        const { sendSupervisorRequest } = await Promise.resolve().then(() => require('./emailService'));
+        await sendSupervisorRequest(supervisor.email, supervisor.name || 'Pastor', `${(_b = appData === null || appData === void 0 ? void 0 : appData.personalInfo) === null || _b === void 0 ? void 0 : _b.firstname} ${(_c = appData === null || appData === void 0 ? void 0 : appData.personalInfo) === null || _c === void 0 ? void 0 : _c.surname}`, endorsementLink);
+        return { success: true, message: `Email sent to ${supervisor.email}` };
+    }
+    catch (error) {
+        console.error('Error resending supervisor email:', error);
+        throw new functions.https.HttpsError('internal', error.message);
+    }
 });
 //# sourceMappingURL=index.js.map

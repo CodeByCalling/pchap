@@ -1,8 +1,16 @@
-import { AddressService } from './philippine_address_data';
+import { PsgcService } from './utils/psgc_service';
 import { auth, db, storage } from './firebase_config';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+
+// ... (imports remain matching, I will target the imports separately or use multi-replace to be safe)
+// Actually, let's just fix the method structure first using the Range where I messed up.
+// I messed up around line 213 (original).
+
+// Wait, I can't easily jump to imports with replace_file_content if I'm targeting the method.
+// I'll use multi_replace.
+
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
 
 export class PCHAPApplication {
     private currentStep: number = 1;
@@ -60,63 +68,85 @@ export class PCHAPApplication {
         this.updateStepper();
     }
 
-    private async setupAddressDropdowns() {
+    private setupAddressDropdowns() {
         const regionSelect = document.getElementById('region') as HTMLSelectElement;
         const provinceSelect = document.getElementById('province') as HTMLSelectElement;
         const citySelect = document.getElementById('city') as HTMLSelectElement;
         const barangaySelect = document.getElementById('barangay') as HTMLSelectElement;
+        const zipInput = document.getElementById('zipCode') as HTMLInputElement;
 
         // Populate Regions
         if (regionSelect) {
             this.setLoading(regionSelect, true);
-            const regions = await AddressService.getRegions();
-            this.populateDropdown(regionSelect, regions.map(r => ({ value: r.region_code, text: r.region_name })));
+            const regions = PsgcService.getRegions();
+            this.populateDropdown(regionSelect, regions.map(r => ({ value: r.code, text: r.name })));
             this.setLoading(regionSelect, false);
 
-            regionSelect.addEventListener('change', async () => {
+            regionSelect.addEventListener('change', () => {
                 const regionCode = regionSelect.value;
                 
                 // Reset child dropdowns
                 this.resetDropdown(provinceSelect);
                 this.resetDropdown(citySelect);
                 this.resetDropdown(barangaySelect);
+                if (zipInput) zipInput.value = ''; // Clear ZIP
 
                 if (regionCode && provinceSelect) {
                     this.setLoading(provinceSelect, true);
-                    const provinces = await AddressService.getProvinces(regionCode);
-                    this.populateDropdown(provinceSelect, provinces.map(p => ({ value: p.province_code, text: p.province_name })));
+                    const provinces = PsgcService.getProvinces(regionCode);
+                    this.populateDropdown(provinceSelect, provinces.map(p => ({ value: p.code, text: p.name })));
                     this.setLoading(provinceSelect, false);
+
+                    // NCR Optimization: Auto-select if logic detects the virtual Metro Manila province
+                    // Or if there's only one option.
+                    if (provinces.length === 1) {
+                         provinceSelect.value = provinces[0].code;
+                         // Manually trigger change event to load cities
+                         provinceSelect.dispatchEvent(new Event('change'));
+                    }
                 }
             });
         }
 
         if (provinceSelect) {
-            provinceSelect.addEventListener('change', async () => {
+            provinceSelect.addEventListener('change', () => {
                 const provinceCode = provinceSelect.value;
+                const regionCode = regionSelect.value;
                 
                 this.resetDropdown(citySelect);
                 this.resetDropdown(barangaySelect);
 
                 if (provinceCode && citySelect) {
                     this.setLoading(citySelect, true);
-                    const cities = await AddressService.getCities(provinceCode);
-                    this.populateDropdown(citySelect, cities.map(c => ({ value: c.city_code, text: c.city_name })));
+                    const cities = PsgcService.getCities(provinceCode, regionCode);
+                    this.populateDropdown(citySelect, cities.map(c => ({ value: c.code, text: c.name })));
                     this.setLoading(citySelect, false);
                 }
             });
         }
 
         if (citySelect) {
-            citySelect.addEventListener('change', async () => {
+            citySelect.addEventListener('change', () => {
                 const cityCode = citySelect.value;
+                const regionCode = regionSelect.value;
+                const provinceCode = provinceSelect.value;
                 
                 this.resetDropdown(barangaySelect);
 
                 if (cityCode && barangaySelect) {
                     this.setLoading(barangaySelect, true);
-                    const barangays = await AddressService.getBarangays(cityCode);
-                    this.populateDropdown(barangaySelect, barangays.map(b => ({ value: b.brgy_code, text: b.brgy_name })));
+                    const barangays = PsgcService.getBarangays(cityCode, provinceCode, regionCode);
+                    this.populateDropdown(barangaySelect, barangays.map(b => ({ value: b.code, text: b.name })));
                     this.setLoading(barangaySelect, false);
+
+                    // ZIP Suggestion
+                    if (zipInput) {
+                        const cityName = citySelect.options[citySelect.selectedIndex].text;
+                        const suggestedZip = PsgcService.suggestZipCode(cityName);
+                        if (suggestedZip) {
+                            zipInput.value = suggestedZip;
+                        }
+                    }
                 }
             });
         }
@@ -169,12 +199,108 @@ export class PCHAPApplication {
             document.body.style.overflow = 'hidden';
             this.currentStep = 1;
             this.showStep(1);
+            
+            // Pre-fill Email if logged in
+            const user = auth.currentUser;
+            if (user) {
+                const emailInput = document.getElementById('email') as HTMLInputElement;
+                if (emailInput) {
+                    emailInput.value = user.email || '';
+                    emailInput.readOnly = true;
+                    emailInput.style.backgroundColor = '#f0f0f0';
+                    emailInput.style.cursor = 'not-allowed';
+                    emailInput.title = "Email locked to logged-in account";
+                }
+                // Load Draft Data
+                this.loadDraft(user.uid);
+            }
+
             // Clear previous beneficiary rows to prevent accumulation
             if (this.beneficiaryTableBody) this.beneficiaryTableBody.innerHTML = '';
-            // Add one empty row by default
+            // Add one empty row by default (will be cleared if draft loads beneficiaries)
             this.addBeneficiaryRow();
         }
     }
+
+    private async loadDraft(uid: string) {
+        try {
+            const docSnap = await getDoc(doc(db, "applications", uid));
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                // Only load if it's a draft
+                if (data.status === 'draft' && data.draftData) {
+                    console.log("Loading draft...", data.draftData);
+                    this.populateForm(data.draftData);
+                }
+            }
+        } catch (e) {
+            console.error("Error loading draft:", e);
+        }
+    }
+
+    private populateForm(data: any) {
+        if (!this.form) return;
+        
+        // 1. Standard Fields
+        Object.keys(data).forEach(key => {
+            // Handle Beneficiaries specially
+            if (key === 'b_f_name' || key === 'b_l_name' || key === 'b_dob' || key === 'b_rel') return;
+            if (key === 'health') return; // Checkboxes
+            if (key === 'disclosure') return; // Checkboxes
+
+            const input = this.form!.querySelector(`[name="${key}"]`) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+            if (input) {
+                if (input.type === 'radio') {
+                     // Find the specific radio with this value
+                     const radio = this.form!.querySelector(`[name="${key}"][value="${data[key]}"]`) as HTMLInputElement;
+                     if (radio) radio.checked = true;
+                } else if (input.type !== 'file') {
+                    input.value = data[key];
+                    // Trigger change for dropdowns to load dependencies
+                    input.dispatchEvent(new Event('change')); 
+                }
+            }
+        });
+
+        // 2. Health Checkboxes
+        if (data.health) {
+            const values = Array.isArray(data.health) ? data.health : [data.health];
+            values.forEach((val: string) => {
+                const cb = this.form!.querySelector(`input[name="health"][value="${val}"]`) as HTMLInputElement;
+                if (cb) cb.checked = true;
+            });
+        }
+
+        // 3. Disclosures
+        if (data.disclosure) {
+             const values = Array.isArray(data.disclosure) ? data.disclosure : [data.disclosure];
+             values.forEach((val: string) => {
+                 const cb = this.form!.querySelector(`input[name="disclosure"][value="${val}"]`) as HTMLInputElement;
+                 if (cb) cb.checked = true;
+             });
+        }
+
+        // 4. Beneficiaries (Complex Reconstitution)
+        if (data.b_f_name && Array.isArray(data.b_f_name)) {
+            // Clear default empty row first
+            if (this.beneficiaryTableBody) this.beneficiaryTableBody.innerHTML = '';
+            
+            for (let i = 0; i < data.b_f_name.length; i++) {
+                this.addBeneficiaryRow(); // Creates row
+                // Now populate the last row added
+                const rows = this.beneficiaryTableBody?.querySelectorAll('tr');
+                if (rows) {
+                    const lastRow = rows[rows.length - 1];
+                    (lastRow.querySelector('input[name="b_f_name[]"]') as HTMLInputElement).value = data.b_f_name[i];
+                    (lastRow.querySelector('input[name="b_l_name[]"]') as HTMLInputElement).value = data.b_l_name[i];
+                    (lastRow.querySelector('input[name="b_dob[]"]') as HTMLInputElement).value = data.b_dob[i];
+                    (lastRow.querySelector('select[name="b_rel[]"]') as HTMLSelectElement).value = data.b_rel[i];
+                }
+            }
+        }
+
+
+    } // End populateForm
 
     public close() {
         if (this.overlay) {
@@ -261,6 +387,10 @@ export class PCHAPApplication {
                     userCred = await signInWithEmailAndPassword(auth, email, password);
                 } else {
                     userCred = await createUserWithEmailAndPassword(auth, email, password);
+                    
+                    // Send Verification Email
+                    await sendEmailVerification(userCred.user);
+                    alert("Account created! A verification email has been sent to your inbox. Please verify your email before submitting your application.");
                 }
                 
                 statusMsg.textContent = "Success! Resuming...";
@@ -298,6 +428,10 @@ export class PCHAPApplication {
             
             // Extract core data simply
             formData.forEach((value, key) => {
+                 // Firestore cannot store File objects. Skip them.
+                 // We only save text data for drafts. Files are uploaded on final submit.
+                 if (value instanceof File) return;
+
                  if (key.includes('[]')) {
                      const keyName = key.replace('[]', '');
                      if (!appData[keyName]) appData[keyName] = [];
@@ -306,6 +440,9 @@ export class PCHAPApplication {
                      appData[key] = value;
                  }
             });
+
+            // Sanitize undefined values just in case
+            Object.keys(appData).forEach(key => appData[key] === undefined && delete appData[key]);
 
             // Set basic structure for Firestore
             const finalDoc = {
@@ -319,6 +456,11 @@ export class PCHAPApplication {
             await setDoc(doc(db, "applications", uid), finalDoc, { merge: true });
             
             alert('Draft saved! You can resume later.');
+            
+            // Navigate to dashboard
+            window.location.hash = 'dashboard';
+            window.location.reload(); // Force reload to ensure state is fresh
+            
             this.close();
 
         } catch (e) {
@@ -337,7 +479,43 @@ export class PCHAPApplication {
 
         if (prevBtn) prevBtn.style.display = step === 1 ? 'none' : 'block';
         if (nextBtn) nextBtn.style.display = step === this.totalSteps ? 'none' : 'block';
-        if (submitBtn) submitBtn.style.display = step === this.totalSteps ? 'block' : 'none';
+        
+        // Unauthenticated User Logic for Final Step
+        if (step === this.totalSteps) {
+             const user = auth.currentUser;
+             const existingPrompt = document.getElementById('unauth-submit-prompt');
+             if (existingPrompt) existingPrompt.remove();
+
+             if (!user) {
+                 if (submitBtn) submitBtn.style.display = 'none';
+                 
+                 // Create prompt
+                 const promptDiv = document.createElement('div');
+                 promptDiv.id = 'unauth-submit-prompt';
+                 promptDiv.style.cssText = 'text-align: center; margin-bottom: 20px; padding: 20px; background: #fff3cd; border: 1px solid #ffeeba; border-radius: 8px; color: #856404;';
+                 promptDiv.innerHTML = `
+                    <p style="margin-bottom: 10px; font-weight: 600;">You must be logged in to submit your application.</p>
+                    <button class="btn btn-primary" id="prompt-login-btn">Log In or Create Account</button>
+                 `;
+                 
+                 // Insert before submit button
+                 submitBtn?.parentNode?.insertBefore(promptDiv, submitBtn);
+                 
+                 promptDiv.querySelector('#prompt-login-btn')?.addEventListener('click', (e) => {
+                     e.preventDefault();
+                     this.showAuthPrompt(async () => {
+                         // On success, hide prompt and show submit
+                         promptDiv.remove();
+                         if (submitBtn) submitBtn.style.display = 'block';
+                     });
+                 });
+
+             } else {
+                 if (submitBtn) submitBtn.style.display = 'block';
+             }
+        } else {
+             if (submitBtn) submitBtn.style.display = 'none';
+        }
 
         this.updateStepper();
     }
@@ -425,7 +603,10 @@ export class PCHAPApplication {
                     <option value="Legal Guardian">Legal Guardian</option>
                 </select>
             </td>
-            <td><button type="button" class="btn-remove" style="color: red; font-weight: bold; border: 1px solid red; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer;">&times;</button></td>
+            <td>
+                <button type="button" class="btn-remove" style="color: red; font-weight: bold; border: none; background: none; font-size: 1.2rem; cursor: pointer;">❌</button>
+                <div style="font-size: 0.6rem; color: #999; margin-top: 2px;">Delete if none</div>
+            </td>
         `;
 
         // Beneficiary Birthday Validation (Must be < 18 years old)
@@ -526,6 +707,20 @@ export class PCHAPApplication {
                 alert("Account created/logged in! Please click 'Submit Application' again to finalize.");
             });
             return;
+        }
+
+        // Email Verification Check
+        if (!user.emailVerified) {
+            // Reload user to check if they verified in the meantime
+            await user.reload();
+            if (!user.emailVerified) {
+                if (confirm("Email verification is required to submit. Resend verification email?")) {
+                    await sendEmailVerification(user);
+                    alert("Verification email sent. Please check your inbox.");
+                }
+                // Stop submission
+                return;
+            }
         }
 
         // Show mock loading state
@@ -647,8 +842,31 @@ export class PCHAPApplication {
                 updatedAt: new Date().toISOString()
             };
 
+            // Sanitize function to remove undefined values
+            const sanitize = (obj: any): any => {
+                const newObj: any = {};
+                Object.keys(obj).forEach(key => {
+                    const value = obj[key];
+                    if (value !== undefined) {
+                        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                             newObj[key] = sanitize(value);
+                        } else {
+                             newObj[key] = value;
+                        }
+                    } else {
+                        // Explicitly set null for expected nullable fields if needed, or just omit
+                        // For this specific bug, we want to ensure we don't send undefined.
+                        // Firestore doesn't like undefined.
+                        newObj[key] = null; 
+                    }
+                });
+                return newObj;
+            };
+
+            const safeFinalDoc = sanitize(finalDoc);
+
             // 3. Save to Firestore
-            await setDoc(doc(db, "applications", user.uid), finalDoc);
+            await setDoc(doc(db, "applications", user.uid), safeFinalDoc);
 
             // Show success with pastor endorsement instructions
             alert(`✅ Application Submitted Successfully!\n\n📧 IMPORTANT: Please send the following endorsement link to your Senior Pastor:\n\n${endorsementUrl}\n\nYour application will be reviewed after pastor endorsement.`);
