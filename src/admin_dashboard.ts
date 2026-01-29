@@ -862,31 +862,98 @@ export class AdminDashboard {
 
         const canApproveForReview = data.pastorEndorsementStatus === 'approved' && data.adminReviewStatus === 'pending';
         const canFinalApprove = data.adminReviewStatus === 'approved' && data.finalApprovalStatus === 'pending';
+        const isPendingPastor = data.pastorEndorsementStatus === 'pending';
+
+        // Helper for address
+        const addr = data.personalInfo?.address || {};
+        const fullAddress = `${addr.houseStreet || ''}, ${addr.barangay || ''}, ${addr.city || ''}, ${addr.province || ''}, ${addr.zipCode || ''}`;
+
+        // Helper for arrays
+        const healthList = Array.isArray(data.healthList) ? data.healthList : (Array.isArray(data.health) ? data.health : []);
+        const disclosures = Array.isArray(data.disclosureList) ? data.disclosureList : (Array.isArray(data.disclosure) ? data.disclosure : []);
+        const beneficiaries = Array.isArray(data.beneficiaries) ? data.beneficiaries : [];
 
         body.innerHTML = `
             <div style="padding: 2rem;">
+                
+                <!-- Status Banner -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid var(--royal-blue); display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h4 style="margin: 0; color: var(--royal-blue);">Current Status</h4>
+                        <span class="status-badge status-${data.status.includes('Reject') ? 'rejected' : (data.finalApprovalStatus === 'approved' ? 'approved' : 'pending')}" style="margin-top: 5px; display: inline-block;">
+                            ${data.status}
+                        </span>
+                    </div>
+                    <div style="text-align: right;">
+                         <small>Submitted: ${new Date(data.submittedAt).toLocaleDateString()}</small>
+                    </div>
+                </div>
+
                 <div class="info-section">
                     <h3>Personal Information</h3>
                     <div class="info-grid">
                         <div><strong>Name:</strong> ${data.personalInfo?.firstname} ${data.personalInfo?.surname}</div>
                         <div><strong>Birthday:</strong> ${data.personalInfo?.birthday}</div>
                         <div><strong>Civil Status:</strong> ${data.personalInfo?.civilStatus}</div>
-                        <div><strong>Nationality:</strong> ${data.personalInfo?.nationality}</div>
-                        <div><strong>Outreach/Church:</strong> ${data.personalInfo?.outreach}</div>
-                        <div><strong>Position:</strong> ${data.personalInfo?.jobTitle}</div>
+                        <!-- Nationality removed -->
                         <div><strong>Email:</strong> ${data.email}</div>
+                        <div><strong>Mobile:</strong> ${data.personalInfo?.mobileNumber || 'N/A'}</div>
+                        <div><strong>Landline:</strong> ${data.personalInfo?.landline || 'N/A'}</div>
+                        <div style="grid-column: span 2;"><strong>Address:</strong> ${fullAddress}</div>
                     </div>
                 </div>
 
                 <div class="info-section">
-                    <h3>Application Status</h3>
+                    <h3>Ministry Information</h3>
                     <div class="info-grid">
-                        <div><strong>Overall Status:</strong> <span class="status-badge">${data.status}</span></div>
-                        <div><strong>Pastor Endorsement:</strong> <span class="status-badge status-${data.pastorEndorsementStatus}">${data.pastorEndorsementStatus}</span></div>
-                        <div><strong>Admin Review:</strong> <span class="status-badge status-${data.adminReviewStatus}">${data.adminReviewStatus}</span></div>
-                        <div><strong>Final Approval:</strong> <span class="status-badge status-${data.finalApprovalStatus}">${data.finalApprovalStatus}</span></div>
+                        <div><strong>Church/Outreach:</strong> ${data.personalInfo?.outreach}</div>
+                        <div><strong>Position:</strong> ${data.personalInfo?.jobTitle}</div>
+                        <div><strong>Supervisor:</strong> ${data.personalInfo?.supervisor?.name || 'N/A'}</div>
+                        <div><strong>Supervisor Email:</strong> ${data.personalInfo?.supervisor?.email || 'N/A'}</div>
+                        <div><strong>Supervisor Mobile:</strong> ${data.personalInfo?.supervisor?.mobile || 'N/A'}</div>
                     </div>
-                    ${data.pastorEndorsementNotes ? `<p style="margin-top: 1rem;"><strong>Pastor Notes:</strong> ${data.pastorEndorsementNotes}</p>` : ''}
+                     ${data.pastorEndorsementNotes ? `<div style="margin-top: 10px; background: #eef; padding: 10px; border-radius: 5px;"><strong>Pastor Notes:</strong> ${data.pastorEndorsementNotes}</div>` : ''}
+                </div>
+
+                <div class="info-section">
+                    <h3>Beneficiaries</h3>
+                    ${beneficiaries.length > 0 ? `
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                        <thead style="background: #f0f0f0;">
+                            <tr>
+                                <th style="padding: 8px; text-align: left;">Name</th>
+                                <th style="padding: 8px; text-align: left;">Relationship</th>
+                                <th style="padding: 8px; text-align: left;">Birthday</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${beneficiaries.map((b: any) => `
+                                <tr style="border-bottom: 1px solid #eee;">
+                                    <td style="padding: 8px;">${b.firstName} ${b.lastName}</td>
+                                    <td style="padding: 8px;">${b.relationship}</td>
+                                    <td style="padding: 8px;">${b.dob}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ` : '<p style="color: #666; font-style: italic;">No beneficiaries listed.</p>'}
+                </div>
+
+                <div class="info-section">
+                    <h3>Health Declaration</h3>
+                    ${healthList.length > 0 ? `
+                        <ul style="padding-left: 20px; color: #d63031; font-weight: 500;">
+                            ${healthList.map((h: string) => `<li>${h}</li>`).join('')}
+                        </ul>
+                    ` : '<p style="color: #27ae60;">✓ No medical conditions declared.</p>'}
+                </div>
+
+                <div class="info-section">
+                    <h3>Agreements & Disclosures</h3>
+                    <ul style="padding-left: 20px; font-size: 0.85rem; color: #555;">
+                        ${disclosures.map((d: string) => `<li>✓ ${d}</li>`).join('')}
+                        <li>✓ I certify that all information provided is true and correct.</li>
+                    </ul>
                 </div>
 
                 <div class="info-section">
@@ -921,9 +988,17 @@ export class AdminDashboard {
 
                 <div class="info-section">
                     <h3>Admin Actions</h3>
-                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                        ${isPendingPastor ? `
+                            <div style="background: #fff3cd; padding: 10px; border-radius: 5px; border: 1px solid #ffeeba; display: flex; gap: 10px; align-items: center;">
+                                <span style="font-size: 0.85rem; color: #856404;">Pending Pastor Endorsement</span>
+                                <button id="force-approve-btn" class="btn" style="background: #e67e22; color: white; padding: 8px 15px; font-size: 0.85rem;">⚡ Force Approve (Override)</button>
+                            </div>
+                        ` : ''}
+                        
                         ${canApproveForReview ? '<button id="approve-review-btn" class="btn btn-primary">✓ Approve for Review</button>' : ''}
                         ${canFinalApprove ? '<button id="final-approve-btn" class="btn btn-primary">✓ Final Approval</button>' : ''}
+                        
                         ${data.status !== 'Rejected' ? '<button id="reject-app-btn" class="btn" style="background: #dc3545; color: white;">✗ Reject Application</button>' : ''}
                         <button id="request-changes-btn" class="btn btn-outline" style="background: #fff3cd; color: #856404; border-color: #ffeeba;">Request Changes</button>
                         <button id="add-note-btn" class="btn btn-outline">Add Admin Note</button>
@@ -970,13 +1045,29 @@ export class AdminDashboard {
             modal.classList.remove('active');
         });
 
+        document.getElementById('force-approve-btn')?.addEventListener('click', async () => {
+            if (confirm("Override Pastor Endorsement and Approve for Review?")) {
+                await AdminDashboard.updateApplicationStatus(appId, { 
+                    pastorEndorsementStatus: 'approved',
+                    pastorEndorsementNotes: 'Overridden by Admin Force Approve',
+                    adminReviewStatus: 'approved', // Jump straight to approved or just pending reviews? User wants button. 
+                    // Let's set it to 'approved' for Endorsement, so next step is Admin Final Approval, 
+                    // OR we can just do both if they want final approval. 
+                    // "Force Approve" usually means "Push it through".
+                    // Let's keep it safe: Approve Endorsement AND Admin Review, so it goes to "Pending Final Approval".
+                    status: 'Pending Final Approval'
+                });
+                modal.classList.remove('active');
+            }
+        });
+
         document.getElementById('approve-review-btn')?.addEventListener('click', async () => {
             await AdminDashboard.updateApplicationStatus(appId, { adminReviewStatus: 'approved', status: 'Pending Final Approval' });
             modal.classList.remove('active');
         });
 
         document.getElementById('final-approve-btn')?.addEventListener('click', async () => {
-            await AdminDashboard.updateApplicationStatus(appId, { finalApprovalStatus: 'approved', status: 'APPROVED - Active Member' });
+            await AdminDashboard.updateApplicationStatus(appId, { finalApprovalStatus: 'approved', status: 'APPROVED - Active Member', approvedAt: new Date().toISOString() });
             modal.classList.remove('active');
         });
 

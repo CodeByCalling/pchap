@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resendSupervisorEmail = exports.onContributionStatusChange = exports.onApplicationStatusChange = exports.sendPaymentReminder = exports.chatWithCounselor = void 0;
+exports.resendSupervisorEmail = exports.onContributionStatusChange = exports.onApplicationStatusChange = exports.sendPaymentReminder = exports.chatWithCounselor = exports.onApplicationCreate = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const generative_ai_1 = require("@google/generative-ai");
@@ -8,6 +8,51 @@ const knowledge_base_1 = require("./knowledge_base");
 const emailService_1 = require("./emailService");
 admin.initializeApp();
 const db = admin.firestore();
+// -------------------------------------------------------------
+// NEW: Automated Email Triggers (on Create)
+// -------------------------------------------------------------
+exports.onApplicationCreate = functions.firestore
+    .document('applications/{userId}')
+    .onCreate(async (snap, context) => {
+    var _a, _b, _c, _d;
+    const data = snap.data();
+    const userId = context.params.userId;
+    console.log(`New application created for ${userId}. Processing automated emails...`);
+    try {
+        // 1. Send Supervisor Endorsement Request
+        const supervisor = (_a = data.personalInfo) === null || _a === void 0 ? void 0 : _a.supervisor;
+        const applicantName = `${(_b = data.personalInfo) === null || _b === void 0 ? void 0 : _b.firstname} ${(_c = data.personalInfo) === null || _c === void 0 ? void 0 : _c.surname}`;
+        const token = data.pastorEndorsementToken;
+        if ((supervisor === null || supervisor === void 0 ? void 0 : supervisor.email) && token) {
+            // Construct Link
+            // Note: Using hardcoded domain as cloud functions don't know the client host.
+            // Ideally this should be an environment config, but for this specific request:
+            const origin = "https://pchap.site";
+            const endorsementLink = `${origin}/#endorse?token=${token}`;
+            const { sendSupervisorRequest } = await Promise.resolve().then(() => require('./emailService'));
+            await sendSupervisorRequest(supervisor.email, supervisor.name || 'Pastor', applicantName, endorsementLink);
+            console.log(`✅ Sent endorsement request to supervisor ${supervisor.email}`);
+        }
+        else {
+            console.log('⚠️ Missing supervisor email or endorsement token. Skipping supervisor email.');
+        }
+        // 2. Send Applicant Confirmation & Admin Notification
+        const applicantEmail = data.email || ((_d = data.personalInfo) === null || _d === void 0 ? void 0 : _d.email);
+        if (applicantEmail) {
+            const { sendApplicationSummary } = await Promise.resolve().then(() => require('./emailService'));
+            // Email 1: To Applicant
+            await sendApplicationSummary(applicantEmail, data, false);
+            console.log(`✅ Sent summary to applicant ${applicantEmail}`);
+            // Email 2: To Admin
+            const adminEmail = 'jrmpchap@gmail.com';
+            await sendApplicationSummary(adminEmail, data, true);
+            console.log(`✅ Sent summary to admin ${adminEmail}`);
+        }
+    }
+    catch (error) {
+        console.error('❌ Error in onApplicationCreate:', error);
+    }
+});
 exports.chatWithCounselor = functions.runWith({
     timeoutSeconds: 60,
     memory: "512MB"

@@ -28,7 +28,7 @@ let unsubscribeAdmin: (() => void) | null = null;
 const renderNavbar = (active: string) => {
   const isAuth = !!currentUser;
   const t = (k: any) => Localization.t(k);
-  const toggleIcon = Localization.currentLang === 'en' ? '🇵🇭' : '🇺🇸';
+
 
   // Auth Button Logic
   const authButton = !isAuth 
@@ -58,7 +58,6 @@ const renderNavbar = (active: string) => {
 
       <!-- Mobile/Header Actions (Always Visible) -->
       <div style="display: flex; align-items: center; gap: 15px;">
-        <button id="lang-toggle" style="background:none; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 32px; height: 32px; font-size: 1.2rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;" title="Switch Language">${toggleIcon}</button>
         
         <!-- Login Button is now here, separate from nav-links -->
         ${authButton}
@@ -596,10 +595,7 @@ const navigate = async () => {
             alert('Error: ' + error.message);
         }
     });
-    document.getElementById('lang-toggle')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        Localization.toggle();
-    });
+
 
     // Password Toggle Logic
     const togglePassword = document.getElementById('toggle-password');
@@ -621,25 +617,24 @@ const navigate = async () => {
     });
   })
 
-  // Language Toggle
-  document.getElementById('lang-toggle')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    Localization.toggle();
-  });
+
 
   // Mobile menu logic
   const setupMobileMenu = () => {
     document.querySelectorAll('.mobile-menu-btn').forEach(btn => {
-      // Find the closest nav container to toggle its links
-      const navLinks = btn.parentElement?.querySelector('.nav-links');
+      // Fix: select .nav-links from the parent nav container
+      const nav = btn.closest('nav');
+      const navLinks = nav?.querySelector('.nav-links');
+      
+      if (!navLinks) return;
       
       btn.addEventListener('click', () => {
-        navLinks?.classList.toggle('active');
+        navLinks.classList.toggle('active');
         btn.classList.toggle('active');
       });
 
       // Auto-hide on link click
-      navLinks?.querySelectorAll('a, button').forEach(link => {
+      navLinks.querySelectorAll('a, button').forEach(link => {
         link.addEventListener('click', () => {
           navLinks.classList.remove('active');
           btn.classList.remove('active');
@@ -668,13 +663,17 @@ window.addEventListener('hashchange', navigate)
 onAuthStateChanged(auth, async (user) => {
     currentUser = user;
     if (user) {
-        // Check if admin (simple email check for now, later use Custom Claims)
-        // const adminDoc = await getDoc(doc(db, "admins", user.uid));
-        // isAdmin = adminDoc.exists(); 
-        // For prototype Phase 2: mock admin check based on email
-        isAdmin = user.email?.includes('admin') || false; 
+        // Check if admin
+        // We allow emails containing 'admin' OR the specific admin email 'jrmpchap@gmail.com'
+        isAdmin = user.email?.includes('admin') || user.email === 'jrmpchap@gmail.com' || false; 
     } else {
         isAdmin = false;
     }
     navigate();
 });
+
+// Handle /admin path for direct access
+if (window.location.pathname === '/admin') {
+  window.history.replaceState(null, '', '/#dashboard');
+  navigate();
+}

@@ -869,7 +869,7 @@ export class PCHAPApplication {
             await setDoc(doc(db, "applications", user.uid), safeFinalDoc);
 
             // Show success with pastor endorsement instructions
-            alert(`✅ Application Submitted Successfully!\n\n📧 IMPORTANT: Please send the following endorsement link to your Senior Pastor:\n\n${endorsementUrl}\n\nYour application will be reviewed after pastor endorsement.`);
+            alert(`Thank you very much, your application has been submitted.`);
             this.close();
             
             // Reset form

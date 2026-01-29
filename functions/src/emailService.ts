@@ -28,6 +28,7 @@ export async function sendEmail(to: string, subject: string, text: string) {
         const mailTrigger = getTransporter();
         const mailOptions = {
             from: `"Pastoral Care Health Assistance Program (PCHAP)" <${process.env.SMTP_EMAIL || (functions as any).config().smtp?.email}>`,
+            replyTo: 'jrmpchap@gmail.com', // Added Reply-To as requested
             to: to,
             subject: subject,
             text: text
@@ -72,6 +73,94 @@ export async function sendSupervisorConfirmation(
                  `PCHAP Admin Team`;
 
     await sendEmail(to, subject, text);
+}
+
+// Helper to format application data into text
+function formatApplicationBody(data: any): string {
+    const p = data.personalInfo || {};
+    const addr = p.address || {};
+    const fullAddress = `${addr.houseStreet || ''}, ${addr.barangay || ''}, ${addr.city || ''}, ${addr.province || ''}, ${addr.zipCode || ''}`;
+    
+    // Arrays
+    const health = Array.isArray(data.healthList) ? data.healthList : (Array.isArray(data.health) ? data.health : []);
+    const disclosures = Array.isArray(data.disclosureList) ? data.disclosureList : (Array.isArray(data.disclosure) ? data.disclosure : []);
+    const beneficiaries = Array.isArray(data.beneficiaries) ? data.beneficiaries : [];
+
+    let text = `APPLICATION REFERENCE: ${data.userId || 'N/A'}\n`;
+    text += `DATE SUBMITTED: ${new Date().toLocaleString()}\n\n`;
+
+    text += `=== PERSONAL INFORMATION ===\n`;
+    text += `Name: ${p.firstname} ${p.surname}\n`;
+    text += `Birthday: ${p.birthday}\n`;
+    text += `Civil Status: ${p.civilStatus}\n`;
+    text += `Email: ${data.email}\n`;
+    text += `Mobile: ${p.mobileNumber || 'N/A'}\n`;
+    text += `Landline: ${p.landline || 'N/A'}\n`;
+    text += `Address: ${fullAddress}\n\n`;
+
+    text += `=== MINISTRY INFORMATION ===\n`;
+    text += `Outreach/Church: ${p.outreach}\n`;
+    text += `Position: ${p.jobTitle}\n`;
+    text += `Supervisor: ${p.supervisor?.name || 'N/A'} (${p.supervisor?.email || 'N/A'})\n\n`;
+
+    text += `=== BENEFICIARIES ===\n`;
+    if (beneficiaries.length > 0) {
+        beneficiaries.forEach((b: any, i: number) => {
+            text += `${i+1}. ${b.firstName} ${b.lastName} (${b.relationship}) - DOB: ${b.dob}\n`;
+        });
+    } else {
+        text += `None declared.\n`;
+    }
+    text += `\n`;
+
+    text += `=== HEALTH DECLARATION ===\n`;
+    if (health.length > 0) {
+        health.forEach((h: string) => text += `- ${h}\n`);
+    } else {
+        text += `No medical conditions declared.\n`;
+    }
+    text += `\n`;
+
+    text += `=== DISCLOSURES & AGREEMENTS ===\n`;
+    if (disclosures.length > 0) {
+        disclosures.forEach((d: string) => text += `- [x] ${d}\n`);
+    }
+    text += `- [x] I certify that all information provided is true and correct.\n\n`;
+
+    text += `=== SUBMITTED DOCUMENTS ===\n`;
+    if (data.documents) {
+        if (data.documents.idCard) text += `ID Card: ${data.documents.idCard}\n`;
+        if (data.documents.photo) text += `Photo: ${data.documents.photo}\n`;
+        if (data.documents.receipt) text += `Receipt: ${data.documents.receipt}\n`;
+        if (data.documents.annexA) text += `Annex A: ${data.documents.annexA}\n`;
+    } else {
+        text += `No documents attached.\n`;
+    }
+
+    return text;
+}
+
+export async function sendApplicationSummary(
+    to: string,
+    data: any,
+    isAdminCopy: boolean = false
+) {
+    const applicantName = `${data.personalInfo?.firstname} ${data.personalInfo?.surname}`;
+    const subject = isAdminCopy 
+        ? `[ADMIN RECORD] New Application: ${applicantName}` 
+        : `Application Received - PCHAP`;
+
+    let intro = isAdminCopy 
+        ? `ADMIN COPY ONLY - DO NOT REPLY\n\nA new application has been received. Please find the full details below for record retention.\n`
+        : `Dear ${applicantName},\n\nThank you very much, your application has been submitted successfully.\n\nHere is a copy of the information you submitted for your records:\n`;
+
+    const body = formatApplicationBody(data);
+
+    let outro = isAdminCopy
+        ? `\nEnd of Record.`
+        : `\n\nPlease ensure you have forwarded the endorsement link to your Senior Pastor. Your application will be processed once we receive their endorsement.\n\nIf you have any questions, you can reply to this email (jrmpchap@gmail.com).\n\nThank you,\nPCHAP Admin Team`;
+
+    await sendEmail(to, subject, intro + "\n" + body + "\n" + outro);
 }
 
 export async function sendPasswordResetLink(to: string, resetLink: string) {

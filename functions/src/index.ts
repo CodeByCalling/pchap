@@ -6,6 +6,65 @@ import { sendEmail } from './emailService';
 admin.initializeApp();
 const db = admin.firestore();
 
+// -------------------------------------------------------------
+// NEW: Automated Email Triggers (on Create)
+// -------------------------------------------------------------
+
+export const onApplicationCreate = functions.firestore
+    .document('applications/{userId}')
+    .onCreate(async (snap, context) => {
+        const data = snap.data();
+        const userId = context.params.userId;
+
+        console.log(`New application created for ${userId}. Processing automated emails...`);
+
+        try {
+            // 1. Send Supervisor Endorsement Request
+            const supervisor = data.personalInfo?.supervisor;
+            const applicantName = `${data.personalInfo?.firstname} ${data.personalInfo?.surname}`;
+            const token = data.pastorEndorsementToken;
+
+            if (supervisor?.email && token) {
+                // Construct Link
+                // Note: Using hardcoded domain as cloud functions don't know the client host.
+                // Ideally this should be an environment config, but for this specific request:
+                const origin = "https://pchap.site"; 
+                const endorsementLink = `${origin}/#endorse?token=${token}`;
+
+                const { sendSupervisorRequest } = await import('./emailService');
+                await sendSupervisorRequest(
+                    supervisor.email,
+                    supervisor.name || 'Pastor',
+                    applicantName,
+                    endorsementLink
+                );
+                console.log(`✅ Sent endorsement request to supervisor ${supervisor.email}`);
+            } else {
+                console.log('⚠️ Missing supervisor email or endorsement token. Skipping supervisor email.');
+            }
+
+            // 2. Send Applicant Confirmation & Admin Notification
+            const applicantEmail = data.email || data.personalInfo?.email;
+            if (applicantEmail) {
+                const { sendApplicationSummary } = await import('./emailService');
+                
+                // Email 1: To Applicant
+                await sendApplicationSummary(applicantEmail, data, false);
+                console.log(`✅ Sent summary to applicant ${applicantEmail}`);
+
+                // Email 2: To Admin
+                const adminEmail = 'jrmpchap@gmail.com';
+                await sendApplicationSummary(adminEmail, data, true);
+                console.log(`✅ Sent summary to admin ${adminEmail}`);
+            }
+
+        } catch (error) {
+            console.error('❌ Error in onApplicationCreate:', error);
+        }
+    });
+
+
+
 export const chatWithCounselor = functions.runWith({
     timeoutSeconds: 60,
     memory: "512MB"
