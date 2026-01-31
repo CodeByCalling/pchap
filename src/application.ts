@@ -575,7 +575,11 @@ export class PCHAPApplication {
         });
 
         if (!isValid) {
-            alert('Please fill out all required fields and disclosures.');
+            if (this.currentStep === 3) {
+                alert('Please acknowledge all disclosures to proceed.');
+            } else {
+                alert('Please fill out all required fields highlighted in red.');
+            }
         }
 
         return isValid;
@@ -714,11 +718,13 @@ export class PCHAPApplication {
             // Reload user to check if they verified in the meantime
             await user.reload();
             if (!user.emailVerified) {
-                if (confirm("Email verification is required to submit. Resend verification email?")) {
+                if (confirm("Email verification is required to submit. An email has been sent to " + user.email + ".\n\nClick OK to resend if needed, or Cancel if you have already verified (then click Submit again).")) {
                     await sendEmailVerification(user);
-                    alert("Verification email sent. Please check your inbox.");
+                    alert("Verification email sent! Please check your inbox (and spam folder).\n\nIMPORTANT: After verifying, come back here and click 'Submit Application' again.");
+                } else {
+                    alert("If you have verified your email, please try clicking 'Submit Application' again.");
                 }
-                // Stop submission
+                // Stop submission until verified
                 return;
             }
         }
